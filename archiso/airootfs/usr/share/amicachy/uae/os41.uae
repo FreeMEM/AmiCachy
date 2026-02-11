@@ -1,0 +1,33 @@
+; AmiCachyEnv — Amiberry AmigaOS 4.1 PPC configuration (placeholder)
+; Requires QEMU PPC bridge support in Amiberry 7.1+
+; Replace kickstart and disk paths with your own files.
+
+config_description=AmiCachyEnv PPC Nitro (OS4.1)
+config_hardware=ppc
+config_host=
+
+; PPC Emulation
+ppc_model=sam460ex
+ppc_cpu=g4
+
+; Kickstart / Boot ROM
+kickstart_rom_file=/home/amiga/kickstarts/os41_boot.rom
+
+; Display
+gfx_width=1280
+gfx_height=720
+gfx_fullscreen_amiga=true
+gfx_api=sdl2
+
+; Sound
+sound_output=exact
+sound_channels=stereo
+sound_frequency=48000
+
+; Storage
+filesystem2=rw,DH0:System:/home/amiga/os41/system,0
+filesystem2=rw,DH1:Work:/home/amiga/os41/work,0
+
+; Input
+joyport0=mouse
+joyport1=joy1

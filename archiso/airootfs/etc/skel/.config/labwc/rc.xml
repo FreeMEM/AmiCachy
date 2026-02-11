@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<labwc_config>
+
+  <core>
+    <decoration>server</decoration>
+    <gap>0</gap>
+  </core>
+
+  <theme>
+    <name>Clearlooks-3.4</name>
+    <font place="ActiveWindow"><name>sans</name><size>10</size></font>
+  </theme>
+
+  <desktops number="2">
+    <names>
+      <name>Code</name>
+      <name>Amiga</name>
+    </names>
+  </desktops>
+
+  <keyboard>
+    <!-- Switch to workspace 1 (Code) -->
+    <keybind key="Super_L-1">
+      <action name="GoToDesktop" to="1"/>
+    </keybind>
+
+    <!-- Switch to workspace 2 (Amiga) -->
+    <keybind key="Super_L-2">
+      <action name="GoToDesktop" to="2"/>
+    </keybind>
+
+    <!-- Open terminal -->
+    <keybind key="Super_L-Return">
+      <action name="Execute" command="foot"/>
+    </keybind>
+
+    <!-- Application launcher -->
+    <keybind key="Super_L-d">
+      <action name="Execute" command="fuzzel"/>
+    </keybind>
+
+    <!-- Close window -->
+    <keybind key="Alt_L-F4">
+      <action name="Close"/>
+    </keybind>
+
+    <!-- Toggle fullscreen -->
+    <keybind key="Super_L-f">
+      <action name="ToggleFullscreen"/>
+    </keybind>
+
+    <!-- Move window to next workspace -->
+    <keybind key="Super_L-Shift_L-1">
+      <action name="SendToDesktop" to="1" follow="false"/>
+    </keybind>
+    <keybind key="Super_L-Shift_L-2">
+      <action name="SendToDesktop" to="2" follow="false"/>
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <context name="TitleBar">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/>
+        <action name="Raise"/>
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Move"/>
+      </mousebind>
+    </context>
+  </mouse>
+
+</labwc_config>

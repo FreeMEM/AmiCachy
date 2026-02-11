@@ -1,0 +1,26 @@
+# Build artifacts
+out/
+work/
+*.iso
+
+# Amiga ROMs and proprietary files
+*.rom
+*.ROM
+kickstarts/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

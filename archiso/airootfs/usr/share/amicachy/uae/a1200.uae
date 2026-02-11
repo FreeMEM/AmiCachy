@@ -1,0 +1,39 @@
+; AmiCachyEnv — Amiberry A1200 configuration (placeholder)
+; Replace kickstart and disk paths with your own files.
+
+config_description=AmiCachyEnv Classic A1200
+config_hardware=aga
+config_host=
+
+; Hardware
+chipset=aga
+chipmem_size=4
+bogomem_size=0
+fastmem_size=8
+cpu_type=68ec020
+cpu_speed=real
+cpu_compatible=true
+cycle_exact=false
+
+; Kickstart
+kickstart_rom_file=/home/amiga/kickstarts/kick31.rom
+kickstart_ext_rom_file=
+
+; Display
+gfx_width=720
+gfx_height=568
+gfx_fullscreen_amiga=true
+
+; Sound
+sound_output=exact
+sound_channels=stereo
+sound_frequency=44100
+
+; Floppy
+floppy0=/home/amiga/disks/workbench31.adf
+floppy_speed=100
+
+; Input
+input.joymouse_speed_analog=2
+joyport0=mouse
+joyport1=joy1

@@ -1,0 +1,5 @@
+# CachyOS mirrors
+Server = https://cdn77.cachyos.org/repo/$repo/$arch
+Server = https://mirror.cachyos.org/repo/$repo/$arch
+Server = https://de-1.cachyos.org/repo/$repo/$arch
+Server = https://de-2.cachyos.org/repo/$repo/$arch

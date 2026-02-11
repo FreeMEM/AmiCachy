@@ -1,0 +1,82 @@
+# Base system
+base
+linux-cachyos
+linux-firmware
+mkinitcpio
+mkinitcpio-archiso
+syslinux
+
+# Bootloader
+systemd-boot
+efibootmgr
+
+# Filesystem
+btrfs-progs
+dosfstools
+e2fsprogs
+ntfs-3g
+
+# Network (minimal for live env)
+networkmanager
+iwd
+dhcpcd
+
+# Wayland compositors
+cage
+labwc
+wlroots
+xorg-xwayland
+
+# Wayland desktop utilities
+waybar
+foot
+fuzzel
+mako
+grim
+slurp
+wl-clipboard
+
+# Audio
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+
+# Graphics drivers (broad support)
+mesa
+vulkan-radeon
+vulkan-intel
+libva-mesa-driver
+intel-media-driver
+xf86-video-amdgpu
+
+# Amiberry runtime dependencies
+sdl2
+sdl2_image
+sdl2_ttf
+libmpeg2
+libpng
+zlib
+flac
+mpg123
+libserialport
+libportmidi
+
+# Development profile
+code
+python
+python-pyside6
+python-pyside6-addons
+qt6-wayland
+
+# System tools
+htop
+nano
+git
+bash-completion
+man-db
+
+# Installer & audit dependencies
+parted
+gptfdisk
+arch-install-scripts

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Labwc autostart — runs after the compositor is ready
+
+# Set wallpaper (placeholder — replace with Amiga-themed wallpaper)
+# swaybg -i /usr/share/amicachy/wallpaper.png -m fill &
+
+# Notification daemon
+mako &
