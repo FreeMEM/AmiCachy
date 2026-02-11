@@ -117,7 +117,8 @@ Reconstruir la ISO para cada cambio es lento (10+ minutos). La VM de desarrollo 
 #### Configuracion inicial (una sola vez)
 
 ```bash
-./tools/dev_vm.sh create
+# Cachear credenciales de sudo antes (necesario para montar el disco con qemu-nbd)
+sudo -v && ./tools/dev_vm.sh create
 ```
 
 Esto crea un disco virtual qcow2 de 40 GB, lo particiona (EFI + root), ejecuta `pacstrap` via Docker con todos los paquetes de AmiCachy, aplica la configuracion de airootfs, instala systemd-boot y configura el autologin. Tarda ~10 minutos la primera vez.
@@ -129,10 +130,13 @@ Esto crea un disco virtual qcow2 de 40 GB, lo particiona (EFI + root), ejecuta `
 vim archiso/airootfs/usr/bin/amilaunch.sh
 
 # 2. Sincronizar cambios al disco de la VM (segundos)
-./tools/dev_vm.sh sync
+sudo -v && ./tools/dev_vm.sh sync
 
 # 3. Arrancar y probar
 ./tools/dev_vm.sh boot
+
+# 4. En otra terminal, ver el log de arranque en tiempo real
+./tools/dev_vm.sh log
 ```
 
 #### Todos los comandos
@@ -142,8 +146,11 @@ vim archiso/airootfs/usr/bin/amilaunch.sh
 | `./tools/dev_vm.sh create` | Una vez: crear disco, pacstrap, configurar (usa Docker) |
 | `./tools/dev_vm.sh sync` | Sincronizar airootfs + boot entries + installer (segundos) |
 | `./tools/dev_vm.sh boot` | Lanzar la VM con QEMU/KVM + UEFI |
-| `./tools/dev_vm.sh shell` | Montar el disco y abrir un subshell para inspeccion manual |
+| `./tools/dev_vm.sh log` | Ver el log de arranque en tiempo real (`--full` para log completo) |
+| `./tools/dev_vm.sh shell` | Montar el disco para inspeccion manual (subshell interactivo) |
 | `./tools/dev_vm.sh destroy` | Eliminar el disco de la VM y todos los artefactos |
+
+> **Nota:** `create`, `sync` y `shell` necesitan `sudo` para montar el disco (`qemu-nbd`). Ejecuta `sudo -v` antes para cachear las credenciales.
 
 #### Configuracion
 
@@ -155,6 +162,20 @@ DISK_SIZE=80G ./tools/dev_vm.sh create        # disco mas grande
 DISPLAY_MODE=safe ./tools/dev_vm.sh boot      # sin aceleracion GL (fallback)
 ```
 
+#### Depuracion
+
+Toda la salida del kernel y servicios se captura via consola serie en `dev/boot.log`:
+
+```bash
+# Log en tiempo real mientras la VM corre (en otra terminal)
+./tools/dev_vm.sh log
+
+# Log completo tras cerrar la VM
+./tools/dev_vm.sh log --full
+```
+
+En el menu de systemd-boot, pulsa `e` para editar parametros del kernel (ej. quitar `quiet splash` para arranque verbose).
+
 #### Acceso SSH
 
 La VM expone el puerto 2222 para SSH:
@@ -162,6 +183,37 @@ La VM expone el puerto 2222 para SSH:
 ```bash
 ssh -p 2222 amiga@localhost   # password: amiga
 ```
+
+### Compilar Amiberry (el emulador)
+
+Amiberry no esta disponible como paquete en los repositorios de Arch/CachyOS. Lo compilamos desde el codigo fuente con optimizaciones de CachyOS para maximo rendimiento en emulacion:
+
+- **CFLAGS x86-64-v3** (AVX2) del `makepkg.conf` de CachyOS
+- **Link-Time Optimization** (LTO) via CMake
+- **Control DBUS** para gestion programatica del emulador
+- **Socket IPC** para futuro debug bridge (VS Code <-> Amiberry)
+
+```bash
+# Compilar el .pkg.tar.zst de amiberry dentro de Docker
+./tools/build_amiberry.sh
+
+# Resultado: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
+```
+
+Para instalarlo en la VM de desarrollo:
+
+```bash
+# Opcion A: montar e instalar
+sudo -v && ./tools/dev_vm.sh shell
+sudo pacman -U /work/out/amiberry-*.pkg.tar.zst   # /work es la raiz del proyecto
+exit
+
+# Opcion B: copiar via SSH con la VM corriendo
+scp -P 2222 out/amiberry-*.pkg.tar.zst amiga@localhost:/tmp/
+ssh -p 2222 amiga@localhost "sudo pacman -U /tmp/amiberry-*.pkg.tar.zst"
+```
+
+El PKGBUILD esta en `pkg/amiberry/PKGBUILD`.
 
 ### Probar la ISO con KVM/libvirt
 
@@ -227,14 +279,23 @@ AmiCachy/
 │   ├── pacman.conf             # Repositorios de paquetes
 │   ├── packages.x86_64         # Lista de paquetes (~60 paquetes)
 │   ├── airootfs/               # Overlay del filesystem (configs, scripts)
+│   │   ├── etc/                # Config del sistema (locale, autologin, plymouth)
+│   │   ├── home/amiga/         # Home del usuario por defecto (labwc, bash_profile)
+│   │   ├── usr/bin/            # amilaunch.sh, start_dev_env.sh, installer
+│   │   └── usr/share/amicachy/ # Configs UAE, tema plymouth
 │   └── efiboot/loader/entries/ # Entradas systemd-boot (6 perfiles)
+├── pkg/
+│   └── amiberry/PKGBUILD       # Paquete Amiberry (optimizado CachyOS, LTO)
 ├── tools/
 │   ├── build_iso.sh            # Build ISO (requiere host Arch/CachyOS)
 │   ├── build_iso_docker.sh     # Build ISO via Docker (cualquier host Linux)
+│   ├── build_amiberry.sh       # Compilar amiberry via Docker
 │   ├── dev_vm.sh               # Gestor de VM de desarrollo (iteracion rapida)
 │   ├── test_iso.sh             # Probar ISO en VM KVM/libvirt
 │   ├── hardware_audit.py       # GUI de auditoria de hardware standalone
 │   └── installer/              # Wizard instalador PySide6 (7 paginas)
+├── dev/                        # [gitignored] Disco de la VM de desarrollo + logs
+├── out/                        # [gitignored] ISOs y paquetes compilados
 ├── ARCHITECTURE.md             # Especificacion tecnica
 ├── MASTER_PLAN.md              # Roadmap y stack tecnologico
 ├── README.md                   # Documentacion (ingles)
@@ -243,9 +304,29 @@ AmiCachy/
 
 ### Contribuir
 
-1. Haz fork del repositorio
-2. Configura el entorno de desarrollo: `./tools/dev_vm.sh create`
-3. Haz tus cambios en `archiso/airootfs/` o `tools/`
-4. Prueba: `./tools/dev_vm.sh sync && ./tools/dev_vm.sh boot`
-5. Cuando estes listo, construye la ISO completa: `./tools/build_iso_docker.sh`
-6. Envia un pull request
+1. **Haz fork y clona** el repositorio
+2. **Instala los requisitos** (ver arriba): Docker, QEMU/KVM, OVMF
+3. **Crea la VM de desarrollo** (una vez, ~10 min):
+   ```bash
+   sudo -v && ./tools/dev_vm.sh create
+   ```
+4. **Compila amiberry** (una vez, ~5 min):
+   ```bash
+   ./tools/build_amiberry.sh
+   # Luego instalalo en la VM:
+   sudo -v && ./tools/dev_vm.sh shell
+   sudo pacman -U /work/out/amiberry-*.pkg.tar.zst
+   exit
+   ```
+5. **Ciclo editar-probar**:
+   ```bash
+   # Edita archivos en archiso/airootfs/ o tools/
+   sudo -v && ./tools/dev_vm.sh sync
+   ./tools/dev_vm.sh boot
+   # En otra terminal: ./tools/dev_vm.sh log
+   ```
+6. **Construye la ISO completa** cuando este listo para distribuir:
+   ```bash
+   ./tools/build_iso_docker.sh
+   ```
+7. **Envia un pull request**

@@ -117,7 +117,8 @@ Rebuilding the ISO for every change is slow (10+ minutes). The dev VM gives you 
 #### Initial setup (one-time)
 
 ```bash
-./tools/dev_vm.sh create
+# Cache sudo credentials first (needed for qemu-nbd disk mounting)
+sudo -v && ./tools/dev_vm.sh create
 ```
 
 This creates a 40 GB qcow2 virtual disk, partitions it (EFI + root), runs `pacstrap` via Docker with all AmiCachy packages, overlays the airootfs configuration, installs systemd-boot, and configures autologin. Takes ~10 minutes on the first run.
@@ -129,10 +130,13 @@ This creates a 40 GB qcow2 virtual disk, partitions it (EFI + root), runs `pacst
 vim archiso/airootfs/usr/bin/amilaunch.sh
 
 # 2. Sync changes to the VM disk (seconds)
-./tools/dev_vm.sh sync
+sudo -v && ./tools/dev_vm.sh sync
 
 # 3. Boot and test
 ./tools/dev_vm.sh boot
+
+# 4. In another terminal, watch the boot log in real time
+./tools/dev_vm.sh log
 ```
 
 #### All commands
@@ -142,8 +146,11 @@ vim archiso/airootfs/usr/bin/amilaunch.sh
 | `./tools/dev_vm.sh create` | One-time: create disk, pacstrap, configure (uses Docker) |
 | `./tools/dev_vm.sh sync` | Sync airootfs + boot entries + installer tools (seconds) |
 | `./tools/dev_vm.sh boot` | Launch the VM with QEMU/KVM + UEFI |
-| `./tools/dev_vm.sh shell` | Mount the disk and open a subshell for manual inspection |
+| `./tools/dev_vm.sh log` | Tail the serial boot log in real time (`--full` for complete log) |
+| `./tools/dev_vm.sh shell` | Mount the disk for manual inspection (interactive subshell) |
 | `./tools/dev_vm.sh destroy` | Remove the dev VM disk and all artifacts |
+
+> **Note:** `create`, `sync`, and `shell` need `sudo` for disk mounting (`qemu-nbd`). Run `sudo -v` beforehand to cache credentials.
 
 #### Configuration
 
@@ -155,6 +162,20 @@ DISK_SIZE=80G ./tools/dev_vm.sh create        # larger disk
 DISPLAY_MODE=safe ./tools/dev_vm.sh boot      # no GL acceleration (fallback)
 ```
 
+#### Debugging
+
+All kernel and service output is captured via serial console to `dev/boot.log`:
+
+```bash
+# Real-time log while VM is running (in a separate terminal)
+./tools/dev_vm.sh log
+
+# Full log after VM exits
+./tools/dev_vm.sh log --full
+```
+
+At the systemd-boot menu, press `e` to edit kernel parameters (e.g., remove `quiet splash` for verbose boot).
+
 #### SSH access
 
 The VM exposes port 2222 for SSH:
@@ -162,6 +183,37 @@ The VM exposes port 2222 for SSH:
 ```bash
 ssh -p 2222 amiga@localhost   # password: amiga
 ```
+
+### Building Amiberry (the emulator)
+
+Amiberry is not available as a pre-built package in Arch/CachyOS repositories. We compile it from source with CachyOS optimizations for maximum emulation performance:
+
+- **x86-64-v3 CFLAGS** (AVX2) from CachyOS's `makepkg.conf`
+- **Link-Time Optimization** (LTO) via CMake
+- **DBUS control** for programmatic emulator management
+- **IPC socket** for future debug bridge (VS Code <-> Amiberry)
+
+```bash
+# Build the amiberry .pkg.tar.zst inside Docker
+./tools/build_amiberry.sh
+
+# Output: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
+```
+
+To install it in the dev VM:
+
+```bash
+# Option A: mount and install
+sudo -v && ./tools/dev_vm.sh shell
+sudo pacman -U /work/out/amiberry-*.pkg.tar.zst   # /work is the project root
+exit
+
+# Option B: copy via SSH while the VM is running
+scp -P 2222 out/amiberry-*.pkg.tar.zst amiga@localhost:/tmp/
+ssh -p 2222 amiga@localhost "sudo pacman -U /tmp/amiberry-*.pkg.tar.zst"
+```
+
+The PKGBUILD is at `pkg/amiberry/PKGBUILD`.
 
 ### Testing the ISO with KVM/libvirt
 
@@ -227,14 +279,23 @@ AmiCachy/
 │   ├── pacman.conf             # Package repositories
 │   ├── packages.x86_64         # Package list (~60 packages)
 │   ├── airootfs/               # Filesystem overlay (configs, scripts)
+│   │   ├── etc/                # System config (locale, autologin, plymouth)
+│   │   ├── home/amiga/         # Default user home (labwc, bash_profile)
+│   │   ├── usr/bin/            # amilaunch.sh, start_dev_env.sh, installer
+│   │   └── usr/share/amicachy/ # UAE configs, plymouth theme
 │   └── efiboot/loader/entries/ # systemd-boot entries (6 profiles)
+├── pkg/
+│   └── amiberry/PKGBUILD       # Amiberry package (CachyOS optimized, LTO)
 ├── tools/
 │   ├── build_iso.sh            # ISO build (requires Arch/CachyOS host)
 │   ├── build_iso_docker.sh     # ISO build via Docker (any Linux host)
+│   ├── build_amiberry.sh       # Compile amiberry via Docker
 │   ├── dev_vm.sh               # Development VM manager (fast iteration)
 │   ├── test_iso.sh             # Test ISO in KVM/libvirt VM
 │   ├── hardware_audit.py       # Standalone hardware audit GUI
 │   └── installer/              # PySide6 installer wizard (7 pages)
+├── dev/                        # [gitignored] Dev VM disk + logs
+├── out/                        # [gitignored] Built ISOs and packages
 ├── ARCHITECTURE.md             # Technical specification
 ├── MASTER_PLAN.md              # Roadmap and tech stack
 ├── README.md                   # This file (English)
@@ -243,9 +304,29 @@ AmiCachy/
 
 ### Contributing
 
-1. Fork the repository
-2. Set up the dev environment: `./tools/dev_vm.sh create`
-3. Make your changes in `archiso/airootfs/` or `tools/`
-4. Test: `./tools/dev_vm.sh sync && ./tools/dev_vm.sh boot`
-5. When ready, build the full ISO: `./tools/build_iso_docker.sh`
-6. Submit a pull request
+1. **Fork and clone** the repository
+2. **Install prerequisites** (see above): Docker, QEMU/KVM, OVMF
+3. **Create the dev VM** (one-time, ~10 min):
+   ```bash
+   sudo -v && ./tools/dev_vm.sh create
+   ```
+4. **Build amiberry** (one-time, ~5 min):
+   ```bash
+   ./tools/build_amiberry.sh
+   # Then install it in the VM:
+   sudo -v && ./tools/dev_vm.sh shell
+   sudo pacman -U /work/out/amiberry-*.pkg.tar.zst
+   exit
+   ```
+5. **Edit-test cycle**:
+   ```bash
+   # Edit files in archiso/airootfs/ or tools/
+   sudo -v && ./tools/dev_vm.sh sync
+   ./tools/dev_vm.sh boot
+   # In another terminal: ./tools/dev_vm.sh log
+   ```
+6. **Build the full ISO** when ready for distribution:
+   ```bash
+   ./tools/build_iso_docker.sh
+   ```
+7. **Submit a pull request**
