@@ -485,38 +485,50 @@ cmd_install() {
 
     require_cmd qemu-nbd docker
 
-    # Validate all packages exist before starting
+    # Resolve to absolute paths and validate
+    local abs_pkgs=()
     for pkg in "${pkg_files[@]}"; do
         [[ -f "$pkg" ]] || die "Package not found: $pkg"
+        abs_pkgs+=("$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")")
     done
 
     nbd_connect
     trap cleanup EXIT
     mount_disk
 
-    # Copy packages into VM's /tmp
-    local pkg_names=()
-    for pkg in "${pkg_files[@]}"; do
-        sudo cp "$pkg" "$MNT/tmp/"
-        pkg_names+=("/tmp/$(basename "$pkg")")
-        echo ":: Copied $(basename "$pkg")"
+    # Stage packages into a temp dir that Docker will mount
+    local staging="${DEV_DIR}/.install-staging"
+    rm -rf "$staging"
+    mkdir -p "$staging"
+    local chroot_pkgs=()
+    for pkg in "${abs_pkgs[@]}"; do
+        local base
+        base=$(basename "$pkg")
+        cp "$pkg" "$staging/"
+        chroot_pkgs+=("/var/cache/pacman/pkg/$base")
+        echo ":: Package: $base"
     done
 
-    # Install via Docker + arch-chroot (handles proc/sys/dev/mtab automatically)
-    echo ":: Installing packages via Docker + arch-chroot..."
+    # Install via Docker + arch-chroot
+    # Use /work mount (same pattern as cmd_create) to copy packages into $MNT,
+    # then arch-chroot to install them.
+    echo ":: Installing via Docker + arch-chroot..."
     docker run --rm --privileged \
         -v "$MNT":"$MNT" \
+        -v "$PROJECT_DIR:/work" \
         "$DOCKER_IMAGE" \
         bash -c "
+            set -euo pipefail
             pacman -Sy --noconfirm arch-install-scripts &>/dev/null
-            arch-chroot \"$MNT\" pacman -U ${pkg_names[*]} --noconfirm
+
+            echo ':: Copying packages into VM disk...'
+            cp -v /work/dev/.install-staging/*.pkg.tar.zst \"$MNT/var/cache/pacman/pkg/\"
+
+            echo ':: Running arch-chroot pacman -U...'
+            arch-chroot \"$MNT\" pacman -U ${chroot_pkgs[*]} --noconfirm
         "
 
-    # Cleanup temp packages
-    for pkg in "${pkg_files[@]}"; do
-        sudo rm -f "$MNT/tmp/$(basename "$pkg")"
-    done
-
+    rm -rf "$staging"
     umount_disk
     nbd_disconnect
     trap - EXIT
