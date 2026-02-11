@@ -147,7 +147,19 @@ sync_files() {
                     "$MNT/usr/bin/amicachy-installer" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
 
-    # 5. Ensure VM's /etc/pacman.conf matches CPU arch level
+    # 5. Fix ownership: rsync -a preserves host uid which maps to amiga (1000)
+    #    inside the VM. System dirs must be root-owned.
+    sudo chown -R root:root "$MNT/etc/sudoers.d" 2>/dev/null || true
+    sudo chmod 750 "$MNT/etc/sudoers.d" 2>/dev/null || true
+    sudo chmod 440 "$MNT/etc/sudoers.d/"* 2>/dev/null || true
+    sudo chown -R root:root "$MNT/etc/systemd" 2>/dev/null || true
+    sudo chown -R root:root "$MNT/etc/sysusers.d" 2>/dev/null || true
+    sudo chown root:root "$MNT/etc/vconsole.conf" "$MNT/etc/hostname" \
+                          "$MNT/etc/locale.conf" "$MNT/etc/locale.gen" 2>/dev/null || true
+    # Amiberry data dir must be writable by amiga (creates configs at runtime)
+    sudo chown -R 1000:1000 "$MNT/usr/share/amiberry" 2>/dev/null || true
+
+    # 6. Ensure VM's /etc/pacman.conf matches CPU arch level
     #    On generic CPUs, remove [cachyos-v3] repo to prevent SIGILL
     if [[ "$CPU_ARCH_LEVEL" == "x86-64" ]]; then
         if sudo grep -q '\[cachyos-v3\]' "$MNT/etc/pacman.conf" 2>/dev/null; then
@@ -156,7 +168,7 @@ sync_files() {
         fi
     fi
 
-    # 6. Regenerate locale if locale-archive is missing or stale
+    # 7. Regenerate locale if locale-archive is missing or stale
     if [[ ! -f "$MNT/usr/lib/locale/locale-archive" ]]; then
         echo ":: Generating locale..."
         sudo chroot "$MNT" locale-gen
