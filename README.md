@@ -1,66 +1,66 @@
-El Alma de AmiCachyEnv
-1. La Misión: "El Amiga definitivo en PC"
-Este proyecto no es una "distro de Linux con un emulador". El objetivo es crear un fork evolucionado de AmiBootEnv que transforme un PC moderno en una estación de trabajo Amiga de alto rendimiento. Queremos que el usuario olvide que hay un Kernel Linux debajo; el sistema debe comportarse como un electrodoméstico dedicado (estilo consola o Android).
+*[Espanol](README.es.md)*
 
-2. ¿Por qué CachyOS y no Debian/Arch estándar?
-La mayoría de los proyectos usan Debian por estabilidad, pero nosotros priorizamos la latencia y la potencia bruta.
+# The Soul of AmiCachyEnv
 
-Kernels Optimizado: CachyOS compila sus kernels para niveles específicos de CPU (x86-64-v3 y v4). Esto nos permite aprovechar instrucciones modernas (AVX-512) que aceleran drásticamente la emulación pesada.
+## 1. The Mission: "The Ultimate Amiga on PC"
+This project is not "a Linux distro with an emulator". The goal is to create an evolved fork of AmiBootEnv that transforms a modern PC into a high-performance Amiga workstation. We want the user to forget there's a Linux kernel underneath; the system should behave like a dedicated appliance (console-style or Android-like).
 
-Latencia Cero: Usamos el scheduler BORE. En emulación, el retraso entre pulsar un botón y ver la reacción en pantalla (input lag) es el enemigo. CachyOS nos da la base más rápida del ecosistema Linux actual.
+## 2. Why CachyOS Instead of Debian/Standard Arch?
+Most projects use Debian for stability, but we prioritize latency and raw power.
 
-Sin Mitigaciones: Para usuarios que quieren exprimir el PowerPC, desactivaremos las mitigaciones de seguridad del kernel (Spectre/Meltdown). En un sistema retro-gaming/dev, ganar ese 10-15% de velocidad es más importante que la seguridad de un servidor.
+**Optimized Kernels:** CachyOS compiles its kernels for specific CPU levels (x86-64-v3 and v4). This allows us to leverage modern instructions (AVX-512) that drastically accelerate heavy emulation.
 
-3. El Desafío del PowerPC (AmigaOS 4.1)
-El hardware nativo de Amiga PPC (como la AmigaOne X5000) es caro y difícil de conseguir. Queremos que este sistema, mediante Amiberry 7.1 y QEMU-PPC, supere (o al menos iguale) ese rendimiento.
+**Zero Latency:** We use the BORE scheduler. In emulation, the delay between pressing a button and seeing the reaction on screen (input lag) is the enemy. CachyOS gives us the fastest base in the current Linux ecosystem.
 
-Para lograrlo, el sistema debe ser capaz de autoconfigurarse. Si detecta un procesador potente, debe asignar prioridades de tiempo real al proceso de emulación.
+**No Mitigations:** For users who want to squeeze every bit of PowerPC performance, we disable kernel security mitigations (Spectre/Meltdown). In a retro-gaming/dev system, gaining that 10-15% speed boost matters more than server-grade security.
 
-4. Estética y Experiencia de Usuario (Anti-Linux)
-El sistema debe estar "oculto".
+## 3. The PowerPC Challenge (AmigaOS 4.1)
+Native Amiga PPC hardware (like the AmigaOne X5000) is expensive and hard to find. We want this system, through Amiberry 7.1 and QEMU-PPC, to surpass (or at least match) that performance.
 
-Silent Boot: Nada de letras blancas scrolleando. Queremos un arranque limpio con el logo de Amiga.
+To achieve this, the system must be self-configuring. If it detects a powerful processor, it should assign real-time priorities to the emulation process.
 
-Wayland/Cage: No usaremos escritorios como GNOME o KDE. Usaremos Cage, un compositor que lanza una sola aplicación a pantalla completa. Si el usuario elige "Amiga 1200", el PC arranca y, sin ver un solo menú de Linux, aparece el Workbench.
+## 4. Aesthetics and User Experience (Anti-Linux)
+The system must stay "hidden".
 
-### Cage: Wayland en su forma más pura
+**Silent Boot:** No white text scrolling by. We want a clean boot with the Amiga logo.
 
-Cage no es una aplicación que corre "dentro" de un escritorio; **es** el servidor gráfico (compositor) en sí mismo. Sustituye a lo que en el mundo antiguo de Linux era X11 o en el moderno es GNOME/KDE.
+**Wayland/Cage:** We won't use desktops like GNOME or KDE. We use Cage, a compositor that launches a single application fullscreen. If the user picks "Amiga 1200", the PC boots and — without seeing a single Linux menu — the Workbench appears.
 
-**Eliminamos el intermediario.** En una distro normal la cadena gráfica es:
+### Cage: Wayland in Its Purest Form
+
+Cage is not an application running "inside" a desktop; it **is** the graphics server (compositor) itself. It replaces what in the old Linux world was X11 or in the modern one is GNOME/KDE.
+
+**We eliminate the middleman.** In a normal distro the graphics chain is:
 
 ```
-Kernel → Servidor Gráfico → Escritorio (panel, fondo, menús) → Amiberry
+Kernel → Graphics Server → Desktop (panel, wallpaper, menus) → Amiberry
 ```
 
-Con Cage, la cadena se reduce a:
+With Cage, the chain becomes:
 
 ```
 Kernel → Cage → Amiberry
 ```
 
-**Control total del frame.** Al ser un compositor de Wayland nativo, Cage le da a Amiberry el control total de la pantalla. Esto es lo que permite que Amiberry v7.1 use KMS (Kernel Mode Setting): la imagen va prácticamente directa de la emulación a la tarjeta gráfica.
+**Full frame control.** As a native Wayland compositor, Cage gives Amiberry total control of the screen. This is what allows Amiberry v7.1 to use KMS (Kernel Mode Setting): the image goes practically straight from emulation to the graphics card.
 
-**Resultado:** nos quitamos de encima el 99% de los problemas de stuttering (tirones) y ese lag que hace que jugar al Pinball Dreams sea injugable.
+**Result:** we eliminate 99% of stuttering problems and the lag that makes playing Pinball Dreams unplayable.
 
-GPU: La detección de la tarjeta gráfica debe ser automática para usar drivers KMS/Wayland nativos, eliminando el tearing y mejorando la fluidez del scroll en los juegos.
+**GPU:** Graphics card detection must be automatic to use native KMS/Wayland drivers, eliminating tearing and improving scroll smoothness in games.
 
-5. El Perfil del Desarrollador (Hybrid Dev)
-No solo queremos jugar, queremos crear.
+## 5. The Developer Profile (Hybrid Dev)
+We don't just want to play, we want to create.
 
-Estoy desarrollando un lenguaje que transpila a C para Amiga y una extensión de VS Code para diseñar GUIs con MUI.
+I'm developing a language that transpiles to C for Amiga and a VS Code extension for designing GUIs with MUI.
 
-Necesito un modo de arranque donde convivan VS Code (moderno) y Amiberry (retro) de forma transparente, compartiendo archivos en tiempo real. Es una "estación de desarrollo híbrida".
+I need a boot mode where VS Code (modern) and Amiberry (retro) coexist seamlessly, sharing files in real time. It's a "hybrid development workstation".
 
-6. Multi-Boot: Un PC, muchos Amigas
-El sistema debe permitir al usuario elegir su "máquina" al encender el PC:
+## 6. Multi-Boot: One PC, Many Amigas
+The system must let the user choose their "machine" at power-on:
 
-Un Amiga 500 para puristas.
+- An Amiga 500 for purists.
+- An Amiga 1200 with RTG for 68k graphics power.
+- An AmigaOS 4.1 for the PowerPC experience.
+- A Development Environment for programming.
 
-Un Amiga 1200 con RTG para potencia gráfica 68k.
-
-Un AmigaOS 4.1 para la experiencia PowerPC.
-
-Un Entorno de Desarrollo para programar.
-
-Cada opción debe ser un entorno optimizado y estanco, pero compartiendo la misma biblioteca de archivos y ROMs.
+Each option must be an optimized, self-contained environment, but sharing the same library of files and ROMs.
