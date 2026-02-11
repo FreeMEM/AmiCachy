@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+export PYTHONPATH="/usr/share/amicachy/tools"
+exec python3 -m installer "$@"

@@ -33,6 +33,9 @@ export QT_QPA_PLATFORM="wayland"
 
 # --- Dispatch based on profile ---
 case "$PROFILE" in
+    installer)
+        exec cage -- /usr/bin/amicachy-installer
+        ;;
     classic_68k)
         exec cage -- amiberry --config "${UAE_DIR}/a1200.uae"
         ;;
@@ -44,7 +47,7 @@ case "$PROFILE" in
         ;;
     *)
         echo "ERROR: Unknown profile '${PROFILE}'." >&2
-        echo "Valid profiles: classic_68k, ppc_nitro, dev_station" >&2
+        echo "Valid profiles: installer, classic_68k, ppc_nitro, dev_station" >&2
         exit 1
         ;;
 esac

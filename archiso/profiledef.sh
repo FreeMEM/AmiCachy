@@ -16,5 +16,6 @@ airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' 
 
 file_permissions=(
   ["/usr/bin/amilaunch.sh"]="0:0:755"
+  ["/usr/bin/amicachy-installer"]="0:0:755"
   ["/usr/bin/start_dev_env.sh"]="0:0:755"
 )

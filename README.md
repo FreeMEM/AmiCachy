@@ -23,6 +23,26 @@ Silent Boot: Nada de letras blancas scrolleando. Queremos un arranque limpio con
 
 Wayland/Cage: No usaremos escritorios como GNOME o KDE. Usaremos Cage, un compositor que lanza una sola aplicación a pantalla completa. Si el usuario elige "Amiga 1200", el PC arranca y, sin ver un solo menú de Linux, aparece el Workbench.
 
+### Cage: Wayland en su forma más pura
+
+Cage no es una aplicación que corre "dentro" de un escritorio; **es** el servidor gráfico (compositor) en sí mismo. Sustituye a lo que en el mundo antiguo de Linux era X11 o en el moderno es GNOME/KDE.
+
+**Eliminamos el intermediario.** En una distro normal la cadena gráfica es:
+
+```
+Kernel → Servidor Gráfico → Escritorio (panel, fondo, menús) → Amiberry
+```
+
+Con Cage, la cadena se reduce a:
+
+```
+Kernel → Cage → Amiberry
+```
+
+**Control total del frame.** Al ser un compositor de Wayland nativo, Cage le da a Amiberry el control total de la pantalla. Esto es lo que permite que Amiberry v7.1 use KMS (Kernel Mode Setting): la imagen va prácticamente directa de la emulación a la tarjeta gráfica.
+
+**Resultado:** nos quitamos de encima el 99% de los problemas de stuttering (tirones) y ese lag que hace que jugar al Pinball Dreams sea injugable.
+
 GPU: La detección de la tarjeta gráfica debe ser automática para usar drivers KMS/Wayland nativos, eliminando el tearing y mejorando la fluidez del scroll en los juegos.
 
 5. El Perfil del Desarrollador (Hybrid Dev)
