@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""AmiCachyEnv Hardware Audit — PySide6 GUI
+"""AmiCachy Hardware Audit — PySide6 GUI
 Detects CPU capabilities, virtualization support, runs a single-core
-benchmark, and recommends which AmiCachyEnv profiles are viable.
+benchmark, and recommends which AmiCachy profiles are viable.
 Results can be exported to JSON for the installer.
 """
 
@@ -195,7 +195,7 @@ def _info_label(text: str) -> QLabel:
 class AuditWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AmiCachyEnv — Hardware Audit")
+        self.setWindowTitle("AmiCachy — Hardware Audit")
         self.setMinimumSize(640, 520)
 
         self._results: dict = {}
@@ -374,7 +374,7 @@ class AuditWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("AmiCachyEnv Hardware Audit")
+    app.setApplicationName("AmiCachy Hardware Audit")
     window = AuditWindow()
     window.show()
     sys.exit(app.exec())

@@ -1,7 +1,7 @@
-# AmiCachyEnv: Technical Architecture & Specification
+# AmiCachy: Technical Architecture & Specification
 
 ## 1. Project Vision
-AmiCachyEnv is a high-performance, minimalist Amiga environment built on **CachyOS (Arch Linux)**. It provides a "near-metal" experience by hiding the Linux layer, optimizing kernel latency for emulation, and providing specialized profiles (68k, PPC, and Development).
+AmiCachy is a high-performance, minimalist Amiga environment built on **CachyOS (Arch Linux)**. It provides a "near-metal" experience by hiding the Linux layer, optimizing kernel latency for emulation, and providing specialized profiles (68k, PPC, and Development).
 
 ## 2. Core Tech Stack
 * **Base OS:** CachyOS (x86-64-v3/v4 optimized kernels).

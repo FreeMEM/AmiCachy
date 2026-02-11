@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AmiCachyEnv — ISO build wrapper
+# AmiCachy — ISO build wrapper
 # Imports CachyOS GPG keys, prepares directories, and runs mkarchiso.
 
 set -euo pipefail

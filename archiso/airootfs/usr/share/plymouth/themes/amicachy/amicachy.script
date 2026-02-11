@@ -1,4 +1,4 @@
-// AmiCachyEnv Plymouth theme — logo + rotating Amiga rainbow spinner
+// AmiCachy Plymouth theme — logo + rotating Amiga rainbow spinner
 
 // --- Background ---
 Window.SetBackgroundTopColor(0.10, 0.10, 0.18);

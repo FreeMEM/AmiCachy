@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AmiCachyEnv — Profile dispatcher
+# AmiCachy — Profile dispatcher
 # Reads amiprofile= from kernel cmdline and launches the appropriate session.
 
 set -euo pipefail

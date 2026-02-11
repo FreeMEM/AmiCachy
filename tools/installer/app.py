@@ -1,4 +1,4 @@
-"""AmiCachyEnv Installer — application entry point."""
+"""AmiCachy Installer — application entry point."""
 
 import os
 import sys
@@ -15,7 +15,7 @@ def main():
     os.environ.setdefault("XDG_SESSION_TYPE", "wayland")
 
     app = QApplication(sys.argv)
-    app.setApplicationName("AmiCachyEnv Setup")
+    app.setApplicationName("AmiCachy Setup")
     app.setStyleSheet(GLOBAL_STYLESHEET)
 
     wizard = InstallerWizard()

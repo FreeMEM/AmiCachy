@@ -325,13 +325,13 @@ def configure_system(runner: CommandRunner) -> None:
     runner.run_chroot(["systemctl", "enable", "NetworkManager"])
 
     # Plymouth boot splash
-    plymouth_theme = f"{mnt}/usr/share/plymouth/themes/amicachyenv"
-    plymouth_src = "/usr/share/plymouth/themes/amicachyenv"
+    plymouth_theme = f"{mnt}/usr/share/plymouth/themes/amicachy"
+    plymouth_src = "/usr/share/plymouth/themes/amicachy"
     if Path(plymouth_src).is_dir():
         shutil.copytree(plymouth_src, plymouth_theme, dirs_exist_ok=True)
     _write_file(
         f"{mnt}/etc/plymouth/plymouthd.conf",
-        "[Daemon]\nTheme=amicachyenv\nShowDelay=0\nDeviceTimeout=5\n",
+        "[Daemon]\nTheme=amicachy\nShowDelay=0\nDeviceTimeout=5\n",
     )
     # mkinitcpio with plymouth hook
     _write_file(

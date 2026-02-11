@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AmiCachyEnv — Launch the ISO in a KVM/libvirt VM for testing.
+# AmiCachy — Launch the ISO in a KVM/libvirt VM for testing.
 # Uses virt-install with UEFI boot, SPICE display, and a scratch disk
 # for testing the installer.
 
@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-VM_NAME="amicachyenv-test"
+VM_NAME="amicachy-test"
 RAM=4096
 CPUS=2
 DISK_SIZE=40  # GiB — enough for EFI + root + data partitions

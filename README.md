@@ -1,6 +1,6 @@
 *[Espanol](README.es.md)*
 
-# The Soul of AmiCachyEnv
+# The Soul of AmiCachy
 
 ## 1. The Mission: "The Ultimate Amiga on PC"
 This project is not "a Linux distro with an emulator". The goal is to create an evolved fork of AmiBootEnv that transforms a modern PC into a high-performance Amiga workstation. We want the user to forget there's a Linux kernel underneath; the system should behave like a dedicated appliance (console-style or Android-like).

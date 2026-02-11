@@ -1,7 +1,7 @@
-; AmiCachyEnv — Amiberry A1200 configuration (placeholder)
+; AmiCachy — Amiberry A1200 configuration (placeholder)
 ; Replace kickstart and disk paths with your own files.
 
-config_description=AmiCachyEnv Classic A1200
+config_description=AmiCachy Classic A1200
 config_hardware=aga
 config_host=
 

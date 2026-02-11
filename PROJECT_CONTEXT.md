@@ -1,7 +1,7 @@
-# PROJECT_CONTEXT.md: Filosofía y Visión de AmiCachyEnv
+# PROJECT_CONTEXT.md: Filosofía y Visión de AmiCachy
 
 ## 1. El Concepto: "Amiga como Electrodoméstico"
-AmiCachyEnv no es una distribución Linux con un emulador instalado; es un sistema diseñado para transformar un PC en una "Máquina Amiga" dedicada. Siguiendo el modelo de abstracción de Android, el usuario nunca debe ver la terminal de Linux, ni el escritorio, ni procesos de carga. Desde el encendido hasta el Workbench, la experiencia debe ser 100% Amiga.
+AmiCachy no es una distribución Linux con un emulador instalado; es un sistema diseñado para transformar un PC en una "Máquina Amiga" dedicada. Siguiendo el modelo de abstracción de Android, el usuario nunca debe ver la terminal de Linux, ni el escritorio, ni procesos de carga. Desde el encendido hasta el Workbench, la experiencia debe ser 100% Amiga.
 
 ## 2. El Factor CachyOS (Rendimiento Extremo)
 Hemos elegido CachyOS (basado en Arch) por tres razones críticas:

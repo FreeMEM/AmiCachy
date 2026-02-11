@@ -1,8 +1,8 @@
-; AmiCachyEnv — Amiberry AmigaOS 4.1 PPC configuration (placeholder)
+; AmiCachy — Amiberry AmigaOS 4.1 PPC configuration (placeholder)
 ; Requires QEMU PPC bridge support in Amiberry 7.1+
 ; Replace kickstart and disk paths with your own files.
 
-config_description=AmiCachyEnv PPC Nitro (OS4.1)
+config_description=AmiCachy PPC Nitro (OS4.1)
 config_hardware=ppc
 config_host=
 

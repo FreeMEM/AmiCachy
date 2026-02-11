@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AmiCachyEnv — Dev Station startup
+# AmiCachy — Dev Station startup
 # Launched by labwc as the session startup script.
 
 UAE_DIR="/usr/share/amicachy/uae"

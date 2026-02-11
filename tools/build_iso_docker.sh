@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AmiCachyEnv — Build ISO inside an Arch Linux Docker container.
+# AmiCachy — Build ISO inside an Arch Linux Docker container.
 # Use this on non-Arch hosts (Ubuntu, Fedora, etc.) where mkarchiso
 # is not available natively.
 
@@ -13,7 +13,7 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
-echo ":: Building AmiCachyEnv ISO in Docker container..."
+echo ":: Building AmiCachy ISO in Docker container..."
 echo "   Project dir: ${PROJECT_DIR}"
 echo ""
 

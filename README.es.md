@@ -1,6 +1,6 @@
 *[English](README.md)*
 
-# El Alma de AmiCachyEnv
+# El Alma de AmiCachy
 
 ## 1. La Mision: "El Amiga definitivo en PC"
 Este proyecto no es una "distro de Linux con un emulador". El objetivo es crear un fork evolucionado de AmiBootEnv que transforme un PC moderno en una estacion de trabajo Amiga de alto rendimiento. Queremos que el usuario olvide que hay un Kernel Linux debajo; el sistema debe comportarse como un electrodomestico dedicado (estilo consola o Android).

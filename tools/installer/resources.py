@@ -11,17 +11,17 @@ MIN_DISK_SIZE = 20 * 1024 * 1024 * 1024
 BOOT_ENTRIES = {
     "classic_68k": {
         "filename": "01-classic-68k.conf",
-        "title": "AmiCachyEnv - Classic 68k",
+        "title": "AmiCachy - Classic 68k",
         "options": "root=LABEL=AMICACHY rw quiet splash loglevel=3 vt.global_cursor_default=0 amiprofile=classic_68k mitigations=off nowatchdog",
     },
     "ppc_nitro": {
         "filename": "02-ppc-nitro.conf",
-        "title": "AmiCachyEnv - PPC Nitro",
+        "title": "AmiCachy - PPC Nitro",
         "options": "root=LABEL=AMICACHY rw quiet splash loglevel=3 vt.global_cursor_default=0 amiprofile=ppc_nitro mitigations=off nowatchdog",
     },
     "dev_station": {
         "filename": "03-dev-station.conf",
-        "title": "AmiCachyEnv - Dev Station",
+        "title": "AmiCachy - Dev Station",
         "options": "root=LABEL=AMICACHY rw quiet splash loglevel=3 vt.global_cursor_default=0 amiprofile=dev_station",
     },
 }

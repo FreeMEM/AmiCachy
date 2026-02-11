@@ -1,4 +1,4 @@
-"""Wizard pages for the AmiCachyEnv installer."""
+"""Wizard pages for the AmiCachy installer."""
 
 import subprocess
 
@@ -78,7 +78,7 @@ class HeaderBar(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 0, 20, 0)
 
-        self._title = QLabel("AmiCachyEnv Setup")
+        self._title = QLabel("AmiCachy Setup")
         self._title.setObjectName("headerTitle")
         layout.addWidget(self._title)
 
@@ -162,7 +162,7 @@ class WelcomePage(QWidget):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(16)
 
-        title = QLabel("Welcome to AmiCachyEnv")
+        title = QLabel("Welcome to AmiCachy")
         title.setAlignment(Qt.AlignCenter)
         font = QFont()
         font.setPointSize(28)
@@ -363,7 +363,7 @@ class DiskSelectPage(QWidget):
 
         layout.addWidget(_page_title("Select Target Drive"))
         layout.addWidget(_subtitle(
-            "Choose the drive where AmiCachyEnv will be installed. "
+            "Choose the drive where AmiCachy will be installed. "
             "All data on the selected drive will be erased."
         ))
 
