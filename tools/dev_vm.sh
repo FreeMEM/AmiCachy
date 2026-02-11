@@ -117,10 +117,18 @@ sync_files() {
         "$PROJECT_DIR/archiso/airootfs/" "$MNT/"
 
     # 2. Boot entries (only installed-system entries, not live/archiso ones)
+    #    Add serial console for logging: console=ttyS0,115200
     echo ":: Syncing boot entries..."
     sudo mkdir -p "$MNT/boot/loader/entries"
     for entry in "$PROJECT_DIR"/archiso/efiboot/loader/entries/0{1,2,3}-*.conf; do
-        [[ -f "$entry" ]] && sudo cp "$entry" "$MNT/boot/loader/entries/"
+        if [[ -f "$entry" ]]; then
+            local dest="$MNT/boot/loader/entries/$(basename "$entry")"
+            sudo cp "$entry" "$dest"
+            # Inject serial console if not already present
+            if ! sudo grep -q 'console=ttyS0' "$dest" 2>/dev/null; then
+                sudo sed -i 's/^options /options console=ttyS0,115200 /' "$dest"
+            fi
+        fi
     done
 
     # 3. Installer tools (bundled at build time, not in airootfs repo tree)
@@ -200,6 +208,10 @@ cmd_create() {
         bash -c "
             set -euo pipefail
 
+            # The CachyOS Docker image doesn't include pacstrap/arch-chroot
+            echo ':: Installing arch-install-scripts inside container...'
+            pacman -Sy --noconfirm arch-install-scripts
+
             echo ':: Initializing pacman keyring...'
             pacman-key --init
             pacman-key --populate cachyos archlinux
@@ -262,7 +274,7 @@ EOF
     docker run --rm --privileged \
         -v "$MNT":"$MNT" \
         "$DOCKER_IMAGE" \
-        bash -c "arch-chroot \"$MNT\" mkinitcpio -P"
+        bash -c "pacman -Sy --noconfirm arch-install-scripts && arch-chroot \"$MNT\" mkinitcpio -P"
 
     # --- 12. Cleanup ---
     umount_disk
@@ -347,10 +359,17 @@ cmd_boot() {
         DISPLAY_ARGS="-display gtk,gl=on"
     fi
 
+    # Serial console log — captures all kernel and service output
+    local BOOT_LOG="${DEV_DIR}/boot.log"
+    : > "$BOOT_LOG"  # truncate previous log
+
     echo ":: Booting AmiCachy dev VM"
     echo "   RAM: ${RAM}M | CPUs: ${CPUS} | Audio: ${AUDIO_ARGS[1]%%,*}"
     echo "   Disk: $DISK"
+    echo "   Log:  $BOOT_LOG"
     echo "   SSH:  ssh -p 2222 amiga@localhost (password: amiga)"
+    echo ""
+    echo "   Tip: In another terminal, run: $0 log"
     echo ""
 
     qemu-system-x86_64 \
@@ -369,6 +388,7 @@ cmd_boot() {
         "${AUDIO_ARGS[@]}" \
         -device ich9-intel-hda \
         -device hda-duplex,audiodev=snd0 \
+        -serial file:"$BOOT_LOG" \
         -usb \
         -device usb-tablet
 }
@@ -429,6 +449,27 @@ cmd_destroy() {
 }
 
 # ---------------------------------------------------------------------------
+# log — Tail the boot log
+# ---------------------------------------------------------------------------
+
+cmd_log() {
+    local BOOT_LOG="${DEV_DIR}/boot.log"
+
+    if [[ ! -f "$BOOT_LOG" ]]; then
+        die "No boot log found. Boot the VM first with '$0 boot'."
+    fi
+
+    if [[ "${1:-}" == "--full" ]]; then
+        cat "$BOOT_LOG"
+    else
+        echo ":: Tailing $BOOT_LOG (Ctrl+C to stop)"
+        echo "   Use '$0 log --full' to see the complete log"
+        echo ""
+        tail -f "$BOOT_LOG"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -442,6 +483,7 @@ Commands:
   create    Create the dev disk and install the system (one-time, uses Docker)
   sync      Sync airootfs + boot entries to the disk (fast, seconds)
   boot      Launch the VM with QEMU/KVM + UEFI
+  log       Tail the boot/serial log (--full for complete log)
   shell     Mount the disk for manual inspection (interactive subshell)
   destroy   Remove the dev VM disk and all artifacts
 
@@ -471,6 +513,7 @@ case "${1:-}" in
     create)  cmd_create  ;;
     sync)    cmd_sync    ;;
     boot)    cmd_boot    ;;
+    log)     shift; cmd_log "$@" ;;
     shell)   cmd_shell   ;;
     destroy) cmd_destroy ;;
     -h|--help|"") usage  ;;
