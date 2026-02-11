@@ -69,6 +69,25 @@ Each option must be an optimized, self-contained environment, but sharing the sa
 
 ## 7. Development Guide
 
+### CPU compatibility
+
+AmiCachy auto-detects your CPU's architecture level and adapts automatically:
+
+| CPU level | Examples | Docker image | Packages | Performance |
+|-----------|----------|-------------|----------|-------------|
+| **x86-64-v3** (AVX2) | Intel Haswell+ (2013), AMD Excavator+ (2015) | `cachyos-v3` | Optimized v3 | Full speed |
+| **x86-64** (generic) | Older Intel/AMD, some VMs | `cachyos` | Generic | ~10-20% slower emulation |
+
+**All build scripts detect this automatically.** No manual configuration needed — if your CPU lacks AVX2, generic packages are used and everything works. You just lose the v3 optimization.
+
+**For distributable ISOs** that need to boot on unknown hardware, use the `--generic` flag:
+
+```bash
+./tools/build_iso_docker.sh --generic   # ISO boots on any x86-64 CPU
+```
+
+**Boot-time safety:** If a v3-built ISO boots on a machine without AVX2, `amilaunch.sh` detects the mismatch and shows a clear error message with instructions instead of crashing.
+
 ### Prerequisites
 
 You need a Linux host (Ubuntu, Fedora, Arch, etc.) with the following:
@@ -99,10 +118,15 @@ The ISO is the final distributable artifact — a bootable `.iso` file with all 
 # Build inside a CachyOS Docker container (works on any host)
 ./tools/build_iso_docker.sh
 
+# Build a universal ISO that boots on any x86-64 CPU (no AVX2 needed)
+./tools/build_iso_docker.sh --generic
+
 # Output: out/amicachy-YYYY.MM.DD-x86_64.iso
 ```
 
-This pulls the `cachyos/cachyos-v3:latest` image, installs `archiso`, initializes the CachyOS keyring, and runs `mkarchiso`. The ISO is written to `out/`.
+The script auto-detects your CPU and selects the matching CachyOS Docker image and package repositories. On CPUs with AVX2, it uses optimized x86-64-v3 packages; on older CPUs, it falls back to generic x86-64 packages automatically.
+
+Use `--generic` when building ISOs for distribution to others (unknown hardware). Without this flag, the ISO is optimized for your machine's CPU.
 
 **Only build the ISO when you need a distributable image.** For day-to-day development, use the dev VM workflow below.
 
@@ -293,6 +317,7 @@ AmiCachy/
 │   ├── dev_vm.sh               # Development VM manager (fast iteration)
 │   ├── test_iso.sh             # Test ISO in KVM/libvirt VM
 │   ├── hardware_audit.py       # Standalone hardware audit GUI
+│   ├── lib/cpu_arch.sh         # CPU arch detection (shared by all scripts)
 │   └── installer/              # PySide6 installer wizard (7 pages)
 ├── dev/                        # [gitignored] Dev VM disk + logs
 ├── out/                        # [gitignored] Built ISOs and packages

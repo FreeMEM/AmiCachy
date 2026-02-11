@@ -19,11 +19,14 @@ DISK="${DEV_DIR}/amicachy-dev.qcow2"
 OVMF_VARS="${DEV_DIR}/OVMF_VARS.fd"
 MNT="/tmp/amicachy-dev-mnt"
 
+# CPU arch detection — auto-selects DOCKER_IMAGE and CPU_ARCH_LEVEL
+# shellcheck source=lib/cpu_arch.sh
+source "${SCRIPT_DIR}/lib/cpu_arch.sh"
+
 # Configurable via environment
 DISK_SIZE="${DISK_SIZE:-40G}"
 RAM="${RAM:-4096}"
 CPUS="${CPUS:-2}"
-DOCKER_IMAGE="${DOCKER_IMAGE:-cachyos/cachyos-v3:latest}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -144,7 +147,16 @@ sync_files() {
                     "$MNT/usr/bin/amicachy-installer" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
 
-    # 5. Regenerate locale if locale-archive is missing or stale
+    # 5. Ensure VM's /etc/pacman.conf matches CPU arch level
+    #    On generic CPUs, remove [cachyos-v3] repo to prevent SIGILL
+    if [[ "$CPU_ARCH_LEVEL" == "x86-64" ]]; then
+        if sudo grep -q '\[cachyos-v3\]' "$MNT/etc/pacman.conf" 2>/dev/null; then
+            echo ":: Removing [cachyos-v3] repo from VM (CPU lacks AVX2)..."
+            sudo sed -i '/^\[cachyos-v3\]/,/^$/d' "$MNT/etc/pacman.conf"
+        fi
+    fi
+
+    # 6. Regenerate locale if locale-archive is missing or stale
     if [[ ! -f "$MNT/usr/lib/locale/locale-archive" ]]; then
         echo ":: Generating locale..."
         sudo chroot "$MNT" locale-gen
@@ -203,16 +215,37 @@ cmd_create() {
         | grep -v 'syslinux' \
         | tr '\n' ' ')
 
+    # Generate appropriate pacman.conf for this CPU's arch level
+    local PACMAN_CONF
+    PACMAN_CONF=$(get_pacman_conf "$PROJECT_DIR/archiso/pacman.conf")
+
     echo ":: Running pacstrap inside Docker (${DOCKER_IMAGE})..."
+    echo "   CPU arch level: ${CPU_ARCH_LEVEL}"
     echo "   This will take several minutes on first run."
     echo ""
+
+    # If generic CPU, mount the filtered pacman.conf over the original
+    local EXTRA_DOCKER_ARGS=()
+    if [[ "$PACMAN_CONF" != "$PROJECT_DIR/archiso/pacman.conf" ]]; then
+        EXTRA_DOCKER_ARGS=(-v "${PACMAN_CONF}:/work/archiso/pacman-build.conf:ro")
+    fi
 
     docker run --rm --privileged \
         -v "$MNT":"$MNT" \
         -v "$PROJECT_DIR:/work" \
+        "${EXTRA_DOCKER_ARGS[@]}" \
+        -e "CPU_ARCH_LEVEL=$CPU_ARCH_LEVEL" \
         "$DOCKER_IMAGE" \
         bash -c "
             set -euo pipefail
+
+            # Select the right pacman.conf inside the container
+            if [[ -f /work/archiso/pacman-build.conf ]]; then
+                PACMAN_CONF=/work/archiso/pacman-build.conf
+                echo ':: Using generic pacman.conf (CPU lacks AVX2)'
+            else
+                PACMAN_CONF=/work/archiso/pacman.conf
+            fi
 
             # The CachyOS Docker image doesn't include pacstrap/arch-chroot
             echo ':: Installing arch-install-scripts inside container...'
@@ -224,10 +257,12 @@ cmd_create() {
 
             # Ensure CachyOS mirrorlists are available for pacstrap
             cp /work/archiso/airootfs/etc/pacman.d/cachyos-mirrorlist    /etc/pacman.d/
-            cp /work/archiso/airootfs/etc/pacman.d/cachyos-v3-mirrorlist /etc/pacman.d/
+            if [[ -f /work/archiso/airootfs/etc/pacman.d/cachyos-v3-mirrorlist ]]; then
+                cp /work/archiso/airootfs/etc/pacman.d/cachyos-v3-mirrorlist /etc/pacman.d/
+            fi
 
             echo ':: Running pacstrap (this takes a while)...'
-            pacstrap -C /work/archiso/pacman.conf \"$MNT\" $PACKAGES
+            pacstrap -C \"\$PACMAN_CONF\" \"$MNT\" $PACKAGES
 
             # Copy locale config before generating (overlay comes later)
             cp /work/archiso/airootfs/etc/locale.gen  \"$MNT/etc/locale.gen\"
@@ -501,8 +536,14 @@ Environment variables:
   DISK_SIZE       Disk image size          (default: 40G)
   RAM             VM memory in MB          (default: 4096)
   CPUS            Number of vCPUs          (default: 2)
-  DOCKER_IMAGE    Docker image for pacstrap (default: cachyos/cachyos-v3:latest)
+  DOCKER_IMAGE    Docker image for pacstrap (auto-detected from CPU)
   DISPLAY_MODE    "auto" (GL) or "safe"    (default: auto)
+
+CPU detection:
+  The script auto-detects your CPU's architecture level (x86-64-v3/AVX2
+  or generic x86-64) and selects the appropriate CachyOS Docker image
+  and package repositories. On CPUs without AVX2, generic packages are
+  used automatically (~10-20% slower emulation, but fully functional).
 
 Typical workflow:
   ./tools/dev_vm.sh create               # first time (slow, uses Docker)

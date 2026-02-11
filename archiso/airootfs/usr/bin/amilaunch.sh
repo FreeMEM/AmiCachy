@@ -7,6 +7,57 @@ set -euo pipefail
 UAE_DIR="/usr/share/amicachy/uae"
 AMIBERRY_BIN="/usr/bin/amiberry"
 
+# --- CPU architecture check ---
+# If the system has x86-64-v3 packages but the CPU lacks AVX2, binaries
+# will crash with SIGILL. Detect this early and show a helpful message.
+check_cpu_compat() {
+    # Check if [cachyos-v3] repo is in pacman.conf (meaning v3 packages installed)
+    if grep -q '^\[cachyos-v3\]' /etc/pacman.conf 2>/dev/null; then
+        # System has v3 packages — verify CPU supports AVX2
+        if ! grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+            # v3 packages on non-v3 CPU — this will crash
+            local cpu_model
+            cpu_model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo "unknown")
+
+            # Use printf to write directly to the framebuffer console (tty)
+            # since Wayland compositors won't start with v3 SIGILL
+            clear
+            echo ""
+            echo "============================================================"
+            echo "  AmiCachy — CPU Incompatible"
+            echo "============================================================"
+            echo ""
+            echo "  This system was built with x86-64-v3 packages (AVX2)"
+            echo "  but your CPU does not support AVX2 instructions."
+            echo ""
+            echo "  CPU: ${cpu_model}"
+            echo ""
+            echo "  The system cannot run v3-optimized binaries on this"
+            echo "  hardware. They will crash with 'Illegal instruction'."
+            echo ""
+            echo "  Solutions:"
+            echo "    1. Use a CPU with AVX2 support:"
+            echo "       - Intel Haswell or newer (2013+)"
+            echo "       - AMD Excavator or newer (2015+)"
+            echo ""
+            echo "    2. Rebuild the ISO with generic packages:"
+            echo "       ./tools/build_iso_docker.sh --generic"
+            echo ""
+            echo "    3. Rebuild the dev VM on this machine:"
+            echo "       ./tools/dev_vm.sh destroy"
+            echo "       ./tools/dev_vm.sh create"
+            echo "       (auto-detects CPU and uses generic packages)"
+            echo ""
+            echo "============================================================"
+            echo ""
+            echo "  Press Enter for a rescue shell, or power off the machine."
+            read -r
+            exec bash
+        fi
+    fi
+}
+check_cpu_compat
+
 # --- Parse profile from kernel command line ---
 PROFILE=""
 read -ra _cmdline < /proc/cmdline

@@ -69,6 +69,25 @@ Cada opcion debe ser un entorno optimizado y estanco, pero compartiendo la misma
 
 ## 7. Guia de Desarrollo
 
+### Compatibilidad de CPU
+
+AmiCachy detecta automaticamente el nivel de arquitectura de tu CPU y se adapta:
+
+| Nivel CPU | Ejemplos | Imagen Docker | Paquetes | Rendimiento |
+|-----------|----------|--------------|----------|-------------|
+| **x86-64-v3** (AVX2) | Intel Haswell+ (2013), AMD Excavator+ (2015) | `cachyos-v3` | Optimizados v3 | Velocidad maxima |
+| **x86-64** (generico) | Intel/AMD antiguos, algunas VMs | `cachyos` | Genericos | ~10-20% menor en emulacion |
+
+**Todos los scripts de build lo detectan automaticamente.** No necesitas configurar nada — si tu CPU no tiene AVX2, se usan paquetes genericos y todo funciona. Solo pierdes la optimizacion v3.
+
+**Para ISOs distribuibles** que necesitan arrancar en hardware desconocido, usa la flag `--generic`:
+
+```bash
+./tools/build_iso_docker.sh --generic   # ISO arranca en cualquier CPU x86-64
+```
+
+**Seguridad en arranque:** Si una ISO construida con v3 arranca en una maquina sin AVX2, `amilaunch.sh` detecta la incompatibilidad y muestra un mensaje claro con instrucciones en vez de crashear.
+
 ### Requisitos previos
 
 Necesitas un host Linux (Ubuntu, Fedora, Arch, etc.) con lo siguiente:
@@ -99,10 +118,15 @@ La ISO es el artefacto final distribuible — un archivo `.iso` arrancable con t
 # Construir dentro de un contenedor Docker de CachyOS (funciona en cualquier host)
 ./tools/build_iso_docker.sh
 
+# Construir una ISO universal que arranca en cualquier CPU x86-64 (sin AVX2)
+./tools/build_iso_docker.sh --generic
+
 # Resultado: out/amicachy-YYYY.MM.DD-x86_64.iso
 ```
 
-Esto descarga la imagen `cachyos/cachyos-v3:latest`, instala `archiso`, inicializa el keyring de CachyOS y ejecuta `mkarchiso`. La ISO se escribe en `out/`.
+El script detecta automaticamente tu CPU y selecciona la imagen Docker y repositorios de paquetes correspondientes. En CPUs con AVX2 usa paquetes x86-64-v3 optimizados; en CPUs mas antiguos usa paquetes x86-64 genericos automaticamente.
+
+Usa `--generic` cuando construyas ISOs para distribuir a otros (hardware desconocido). Sin esta flag, la ISO se optimiza para la CPU de tu maquina.
 
 **Solo construye la ISO cuando necesites una imagen distribuible.** Para el desarrollo del dia a dia, usa el flujo de la VM de desarrollo.
 
@@ -293,6 +317,7 @@ AmiCachy/
 │   ├── dev_vm.sh               # Gestor de VM de desarrollo (iteracion rapida)
 │   ├── test_iso.sh             # Probar ISO en VM KVM/libvirt
 │   ├── hardware_audit.py       # GUI de auditoria de hardware standalone
+│   ├── lib/cpu_arch.sh         # Deteccion de CPU (compartido por todos los scripts)
 │   └── installer/              # Wizard instalador PySide6 (7 paginas)
 ├── dev/                        # [gitignored] Disco de la VM de desarrollo + logs
 ├── out/                        # [gitignored] ISOs y paquetes compilados

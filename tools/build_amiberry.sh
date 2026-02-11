@@ -15,7 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PKG_DIR="${PROJECT_DIR}/pkg/amiberry"
 OUT_DIR="${PROJECT_DIR}/out"
-DOCKER_IMAGE="${DOCKER_IMAGE:-cachyos/cachyos-v3:latest}"
+
+# CPU arch detection — auto-selects DOCKER_IMAGE and CPU_ARCH_LEVEL
+# shellcheck source=lib/cpu_arch.sh
+source "${SCRIPT_DIR}/lib/cpu_arch.sh"
 
 if ! command -v docker &>/dev/null; then
     echo "ERROR: docker is not installed." >&2
