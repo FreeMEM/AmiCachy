@@ -58,6 +58,8 @@ flac
 mpg123
 libserialport
 portmidi
+enet
+tinyxml2
 
 # Development profile
 code

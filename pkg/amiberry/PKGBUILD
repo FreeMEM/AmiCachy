@@ -1,0 +1,46 @@
+# Maintainer: AmiCachy Project
+# Based on AUR amiberry by Dimitris Panokostas, Chandler Kluser, Christer Solskogen
+#
+# AmiCachy build: optimized for CachyOS x86-64-v3 with LTO and DBUS control.
+# The CachyOS makepkg.conf provides -march=x86-64-v3 -O3 via CFLAGS.
+# We add LTO through CMake (WITH_LTO=ON) and disable makepkg's own LTO
+# to avoid double -flto flags.
+
+pkgname=amiberry
+pkgver=7.1.1
+pkgrel=1
+pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, LTO)"
+arch=('x86_64')
+url="https://github.com/BlitterStudio/amiberry"
+license=('GPL-3.0-or-later')
+depends=(
+    'sdl2' 'sdl2_image' 'sdl2_ttf'
+    'flac' 'mpg123' 'libmpeg2'
+    'libserialport' 'portmidi'
+    'enet' 'libpcap' 'tinyxml2'
+    'zstd' 'dbus'
+    'hicolor-icon-theme'
+)
+makedepends=('git' 'cmake' 'ninja')
+provides=("amiberry=${pkgver}")
+conflicts=('amiberry-git' 'amiberry-lite')
+source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+options=('!lto')  # LTO handled by CMake WITH_LTO, not makepkg
+
+build() {
+    cd "${pkgname}"
+    cmake -B build \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DWITH_LTO=ON \
+        -DUSE_DBUS=ON \
+        -DUSE_ZSTD=ON \
+        -DUSE_IPC_SOCKET=ON
+    cmake --build build
+}
+
+package() {
+    DESTDIR="${pkgdir}" cmake --install "${pkgname}/build"
+}

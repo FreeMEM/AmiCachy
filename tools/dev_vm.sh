@@ -143,6 +143,12 @@ sync_files() {
     sudo chmod 755 "$MNT/usr/bin/amilaunch.sh" \
                     "$MNT/usr/bin/amicachy-installer" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
+
+    # 5. Regenerate locale if locale-archive is missing or stale
+    if [[ ! -f "$MNT/usr/lib/locale/locale-archive" ]]; then
+        echo ":: Generating locale..."
+        sudo chroot "$MNT" locale-gen
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -223,9 +229,13 @@ cmd_create() {
             echo ':: Running pacstrap (this takes a while)...'
             pacstrap -C /work/archiso/pacman.conf \"$MNT\" $PACKAGES
 
+            # Copy locale config before generating (overlay comes later)
+            cp /work/archiso/airootfs/etc/locale.gen  \"$MNT/etc/locale.gen\"
+            cp /work/archiso/airootfs/etc/locale.conf \"$MNT/etc/locale.conf\"
+
             echo ':: Configuring system...'
             arch-chroot \"$MNT\" bash -c '
-                # Generate locale
+                # Generate locale (locale.gen already in place)
                 locale-gen
 
                 # Install systemd-boot
