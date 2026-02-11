@@ -6,8 +6,7 @@ mkinitcpio
 mkinitcpio-archiso
 syslinux
 
-# Bootloader
-systemd-boot
+# Bootloader (bootctl is part of systemd, included in base)
 efibootmgr
 
 # Filesystem
@@ -21,10 +20,9 @@ networkmanager
 iwd
 dhcpcd
 
-# Wayland compositors
+# Wayland compositors (wlroots pulled as dependency of cage/labwc)
 cage
 labwc
-wlroots
 xorg-xwayland
 
 # Wayland desktop utilities
@@ -46,7 +44,6 @@ wireplumber
 mesa
 vulkan-radeon
 vulkan-intel
-libva-mesa-driver
 intel-media-driver
 xf86-video-amdgpu
 
@@ -60,13 +57,12 @@ zlib
 flac
 mpg123
 libserialport
-libportmidi
+portmidi
 
 # Development profile
 code
 python
-python-pyside6
-python-pyside6-addons
+pyside6
 qt6-wayland
 
 # System tools
