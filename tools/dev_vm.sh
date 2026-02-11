@@ -474,6 +474,59 @@ cmd_shell() {
 }
 
 # ---------------------------------------------------------------------------
+# install — Install .pkg.tar.zst packages into the VM via Docker
+# ---------------------------------------------------------------------------
+
+cmd_install() {
+    local pkg_files=("$@")
+
+    [[ ${#pkg_files[@]} -eq 0 ]] && die "Usage: $0 install <package.pkg.tar.zst> ..."
+    [[ -f "$DISK" ]] || die "No dev disk found. Run '$0 create' first."
+
+    require_cmd qemu-nbd docker
+
+    # Validate all packages exist before starting
+    for pkg in "${pkg_files[@]}"; do
+        [[ -f "$pkg" ]] || die "Package not found: $pkg"
+    done
+
+    nbd_connect
+    trap cleanup EXIT
+    mount_disk
+
+    # Copy packages into VM's /tmp
+    local pkg_names=()
+    for pkg in "${pkg_files[@]}"; do
+        sudo cp "$pkg" "$MNT/tmp/"
+        pkg_names+=("/tmp/$(basename "$pkg")")
+        echo ":: Copied $(basename "$pkg")"
+    done
+
+    # Install via Docker + arch-chroot (handles proc/sys/dev/mtab automatically)
+    echo ":: Installing packages via Docker + arch-chroot..."
+    docker run --rm --privileged \
+        -v "$MNT":"$MNT" \
+        "$DOCKER_IMAGE" \
+        bash -c "
+            pacman -Sy --noconfirm arch-install-scripts &>/dev/null
+            arch-chroot \"$MNT\" pacman -U ${pkg_names[*]} --noconfirm
+        "
+
+    # Cleanup temp packages
+    for pkg in "${pkg_files[@]}"; do
+        sudo rm -f "$MNT/tmp/$(basename "$pkg")"
+    done
+
+    umount_disk
+    nbd_disconnect
+    trap - EXIT
+
+    echo ""
+    echo ":: Packages installed successfully."
+    echo "   Run '$0 boot' to test."
+}
+
+# ---------------------------------------------------------------------------
 # destroy — Remove everything
 # ---------------------------------------------------------------------------
 
@@ -528,6 +581,7 @@ Commands:
   create    Create the dev disk and install the system (one-time, uses Docker)
   sync      Sync airootfs + boot entries to the disk (fast, seconds)
   boot      Launch the VM with QEMU/KVM + UEFI
+  install   Install .pkg.tar.zst packages into the VM (uses Docker)
   log       Tail the boot/serial log (--full for complete log)
   shell     Mount the disk for manual inspection (interactive subshell)
   destroy   Remove the dev VM disk and all artifacts
@@ -564,6 +618,7 @@ case "${1:-}" in
     create)  cmd_create  ;;
     sync)    cmd_sync    ;;
     boot)    cmd_boot    ;;
+    install) shift; cmd_install "$@" ;;
     log)     shift; cmd_log "$@" ;;
     shell)   cmd_shell   ;;
     destroy) cmd_destroy ;;

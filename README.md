@@ -170,6 +170,7 @@ sudo -v && ./tools/dev_vm.sh sync
 | `./tools/dev_vm.sh create` | One-time: create disk, pacstrap, configure (uses Docker) |
 | `./tools/dev_vm.sh sync` | Sync airootfs + boot entries + installer tools (seconds) |
 | `./tools/dev_vm.sh boot` | Launch the VM with QEMU/KVM + UEFI |
+| `./tools/dev_vm.sh install <pkg>` | Install .pkg.tar.zst packages into the VM (uses Docker) |
 | `./tools/dev_vm.sh log` | Tail the serial boot log in real time (`--full` for complete log) |
 | `./tools/dev_vm.sh shell` | Mount the disk for manual inspection (interactive subshell) |
 | `./tools/dev_vm.sh destroy` | Remove the dev VM disk and all artifacts |
@@ -231,14 +232,8 @@ The PKGBUILD is at `pkg/amiberry/PKGBUILD`.
 Build once, install once — the package **persists in the qcow2 disk** across reboots. You only need to reinstall if you `destroy` the VM or want to update to a newer version.
 
 ```bash
-# Install (one-time, after building)
-sudo -v && ./tools/dev_vm.sh shell
-sudo pacman -U /work/out/amiberry-*.pkg.tar.zst   # /work is the project root
-exit
-
-# Alternative: copy via SSH while the VM is running
-scp -P 2222 out/amiberry-*.pkg.tar.zst amiga@localhost:/tmp/
-ssh -p 2222 amiga@localhost "sudo pacman -U /tmp/amiberry-*.pkg.tar.zst"
+# Install (one-time, after building — uses Docker + arch-chroot)
+sudo -v && ./tools/dev_vm.sh install out/amiberry-*.pkg.tar.zst
 ```
 
 #### Amiberry in the ISO
@@ -351,13 +346,10 @@ AmiCachy/
    ```bash
    sudo -v && ./tools/dev_vm.sh create
    ```
-4. **Build amiberry** (one-time, ~5 min):
+4. **Build and install amiberry** (one-time, ~5 min):
    ```bash
    ./tools/build_amiberry.sh
-   # Then install it in the VM:
-   sudo -v && ./tools/dev_vm.sh shell
-   sudo pacman -U /work/out/amiberry-*.pkg.tar.zst
-   exit
+   sudo -v && ./tools/dev_vm.sh install out/amiberry-*.pkg.tar.zst
    ```
 5. **Edit-test cycle**:
    ```bash
