@@ -28,9 +28,9 @@ GPU: La detección de la tarjeta gráfica debe ser automática para usar drivers
 5. El Perfil del Desarrollador (Hybrid Dev)
 No solo queremos jugar, queremos crear.
 
-El creador del proyecto está desarrollando un lenguaje que transpila a C para Amiga y una extensión de VS Code para diseñar GUIs con MUI.
+Estoy desarrollando un lenguaje que transpila a C para Amiga y una extensión de VS Code para diseñar GUIs con MUI.
 
-Necesitamos un modo de arranque donde convivan VS Code (moderno) y Amiberry (retro) de forma transparente, compartiendo archivos en tiempo real. Es una "estación de desarrollo híbrida".
+Necesito un modo de arranque donde convivan VS Code (moderno) y Amiberry (retro) de forma transparente, compartiendo archivos en tiempo real. Es una "estación de desarrollo híbrida".
 
 6. Multi-Boot: Un PC, muchos Amigas
 El sistema debe permitir al usuario elegir su "máquina" al encender el PC:

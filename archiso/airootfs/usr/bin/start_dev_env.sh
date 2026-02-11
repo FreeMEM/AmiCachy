@@ -2,8 +2,6 @@
 # AmiCachyEnv — Dev Station startup
 # Launched by labwc as the session startup script.
 
-set -euo pipefail
-
 UAE_DIR="/usr/share/amicachy/uae"
 
 # Wait for compositor to be ready
@@ -18,5 +16,5 @@ code --ozone-platform=wayland --new-window &
 # Launch Amiberry in windowed mode on workspace 2
 amiberry --config "${UAE_DIR}/a1200.uae" &
 
-# Keep the session alive
-wait
+# Keep the session alive — don't exit on individual process failures
+wait || true

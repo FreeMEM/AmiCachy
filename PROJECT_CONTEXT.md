@@ -13,7 +13,7 @@ Hemos elegido CachyOS (basado en Arch) por tres razones críticas:
 El objetivo es que un PC moderno, mediante Amiberry 7.1 y QEMU-PPC, "debería" superar en rendimiento a hardware nativo costoso como el AmigaOne X5000. Para ello, necesitamos una detección de hardware precisa que asigne prioridades de tiempo real al proceso de emulación.
 
 ## 4. Entorno de Desarrollo Híbrido
-El proyecto incluye un perfil especial de arranque para programadores. El creador está desarrollando un lenguaje que transpila a C nativo de Amiga y una extensión de VS Code para diseñar interfaces MUI. 
+El proyecto incluye un perfil especial de arranque para programadores. Estoy desarrollando un lenguaje que transpila a C nativo de Amiga y una extensión de VS Code para diseñar interfaces MUI. 
 Este perfil debe permitir que convivan herramientas modernas (VS Code) y la ejecución retro (Amiberry) en un entorno Wayland ligero (Labwc), comunicándose de forma transparente.
 
 ## 5. Experiencia "Invisible"

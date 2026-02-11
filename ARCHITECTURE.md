@@ -28,7 +28,7 @@ The installer must validate the following before allowing PPC installation:
 * **Single-Core Bench:** A Python stress test to estimate if the CPU can surpass native PPC hardware (e.g., AmigaOne X5000).
 
 ## 5. Development Environment (AmiCachyDev)
-A specialized profile designed for the user's custom language (Transpiler -> C -> Amiga Native).
+A specialized profile designed for my custom language (Transpiler -> C -> Amiga Native).
 * **Workflow:** Hybrid Linux-Amiga development.
 * **Tools:** VS Code (OSS) + Custom MUI Design Extension.
 * **Integration:** Automatic shared folders between Linux and Amiberry (`DEV:` drive).

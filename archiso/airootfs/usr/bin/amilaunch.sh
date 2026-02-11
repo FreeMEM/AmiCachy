@@ -8,7 +8,8 @@ UAE_DIR="/usr/share/amicachy/uae"
 
 # --- Parse profile from kernel command line ---
 PROFILE=""
-for param in $(< /proc/cmdline); do
+read -ra _cmdline < /proc/cmdline
+for param in "${_cmdline[@]}"; do
     case "$param" in
         amiprofile=*) PROFILE="${param#amiprofile=}" ;;
     esac
@@ -21,7 +22,8 @@ if [[ -z "$PROFILE" ]]; then
 fi
 
 # --- Wayland environment setup ---
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
 mkdir -p "$XDG_RUNTIME_DIR"
 
 export XKB_DEFAULT_LAYOUT="us"

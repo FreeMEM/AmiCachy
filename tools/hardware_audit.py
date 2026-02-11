@@ -200,6 +200,8 @@ class AuditWindow(QMainWindow):
 
         self._results: dict = {}
         self._bench_worker: BenchmarkWorker | None = None
+        self._bench_result_data: dict = {}
+        self._profiles_data: list[dict] = []
 
         # --- Gather hardware info ---
         self._cpuinfo = read_cpuinfo()
@@ -351,7 +353,7 @@ class AuditWindow(QMainWindow):
 
     @property
     def _bench_result(self):
-        return getattr(self, "_BenchmarkWorker__bench_result", getattr(self, "_bench_result_data", {}))
+        return self._bench_result_data
 
     @_bench_result.setter
     def _bench_result(self, value):
@@ -359,7 +361,7 @@ class AuditWindow(QMainWindow):
 
     @property
     def _profiles(self):
-        return getattr(self, "_profiles_data", [])
+        return self._profiles_data
 
     @_profiles.setter
     def _profiles(self, value):

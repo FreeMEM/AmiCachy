@@ -312,6 +312,8 @@ class DiskCard(QFrame):
     def __init__(self, disk: dict, parent=None):
         super().__init__(parent)
         self.device = disk["device"]
+        self.model = disk.get("model", "Unknown drive")
+        self.size = disk.get("size", 0)
         self._selected = False
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("diskCard")
@@ -421,14 +423,12 @@ class DiskSelectPage(QWidget):
 
     def _on_disk_clicked(self, device: str) -> None:
         self.state.target_device = device
-        # Find model and size from the card
         for card in self._cards:
             selected = card.device == device
             card.set_selected(selected)
             if selected:
-                # Extract model text from the card
-                for disk_data_attr in ("model", "size"):
-                    pass  # data is in the card already
+                self.state.target_device_model = card.model
+                self.state.target_device_size = card.size
         self.disk_selected.emit(device)
 
 
@@ -446,6 +446,7 @@ class ProfileSelectPage(QWidget):
         super().__init__(parent)
         self.state = state
         self._checkboxes: dict[str, QCheckBox] = {}
+        self._status_dots: dict[str, QLabel] = {}
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -482,10 +483,12 @@ class ProfileSelectPage(QWidget):
             text_layout.addWidget(desc_lbl)
             h.addLayout(text_layout, stretch=1)
 
-            # Status dot (will be colored after audit)
-            self._status_dot = QLabel("\u25cf")
-            self._status_dot.setFixedWidth(24)
-            h.addWidget(self._status_dot)
+            # Status dot (colored after audit)
+            dot = QLabel("\u25cf")
+            dot.setFixedWidth(24)
+            dot.setStyleSheet("color: #888; font-size: 18px;")
+            self._status_dots[profile_id] = dot
+            h.addWidget(dot)
 
             layout.addWidget(frame)
 
@@ -507,7 +510,7 @@ class ProfileSelectPage(QWidget):
         layout.addStretch()
 
     def update_from_audit(self) -> None:
-        """Disable profiles marked red in the audit."""
+        """Disable red profiles and color status dots from audit results."""
         profiles = self.state.audit_result.get("profiles", [])
         profile_map = {p["name"]: p for p in profiles}
 
@@ -515,6 +518,13 @@ class ProfileSelectPage(QWidget):
             display_name = PROFILE_DISPLAY[profile_id]["name"]
             p = profile_map.get(display_name, {})
             status = p.get("status", "green")
+
+            # Color the status dot
+            dot = self._status_dots.get(profile_id)
+            if dot:
+                color = STATUS_COLORS.get(status, "#888")
+                dot.setStyleSheet(f"color: {color}; font-size: 18px;")
+
             if status == "red":
                 cb.setChecked(False)
                 cb.setEnabled(False)

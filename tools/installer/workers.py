@@ -1,6 +1,7 @@
 """QThread workers for long-running operations."""
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -100,6 +101,7 @@ class DiskScanWorker(QThread):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=10,
             )
             data = json.loads(result.stdout)
 
@@ -110,11 +112,11 @@ class DiskScanWorker(QThread):
                     ["findmnt", "-n", "-o", "SOURCE", "/"],
                     capture_output=True,
                     text=True,
+                    timeout=10,
                 )
                 live_source = findmnt.stdout.strip()
                 # Strip partition suffix to get parent device
                 # /dev/sda1 -> sda, /dev/nvme0n1p1 -> nvme0n1
-                import re
                 match = re.match(r"/dev/(\w+?)(?:p?\d+)?$", live_source)
                 if match:
                     live_device = match.group(1)
@@ -148,7 +150,8 @@ class DiskScanWorker(QThread):
                     "size_display": f"{size_gb:.1f} GB",
                 })
 
-        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                json.JSONDecodeError, KeyError):
             pass
 
         self.finished.emit(disks)
