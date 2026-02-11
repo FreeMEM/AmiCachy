@@ -474,61 +474,76 @@ cmd_shell() {
 }
 
 # ---------------------------------------------------------------------------
-# install — Install .pkg.tar.zst packages into the VM via Docker
+# install — Install packages into the VM via Docker (local .pkg.tar.zst or repo names)
 # ---------------------------------------------------------------------------
 
 cmd_install() {
-    local pkg_files=("$@")
+    local args=("$@")
 
-    [[ ${#pkg_files[@]} -eq 0 ]] && die "Usage: $0 install <package.pkg.tar.zst> ..."
+    [[ ${#args[@]} -eq 0 ]] && die "Usage: $0 install <package.pkg.tar.zst|package-name> ..."
     [[ -f "$DISK" ]] || die "No dev disk found. Run '$0 create' first."
 
     require_cmd qemu-nbd docker
 
-    # Resolve to absolute paths and validate
-    local abs_pkgs=()
-    for pkg in "${pkg_files[@]}"; do
-        [[ -f "$pkg" ]] || die "Package not found: $pkg"
-        abs_pkgs+=("$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")")
+    # Separate local files from repo package names
+    local abs_pkgs=() repo_pkgs=()
+    for arg in "${args[@]}"; do
+        if [[ -f "$arg" ]]; then
+            abs_pkgs+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+        else
+            repo_pkgs+=("$arg")
+        fi
     done
 
     nbd_connect
     trap cleanup EXIT
     mount_disk
 
-    # Stage packages into a temp dir that Docker will mount
-    local staging="${DEV_DIR}/.install-staging"
-    rm -rf "$staging"
-    mkdir -p "$staging"
-    local chroot_pkgs=()
-    for pkg in "${abs_pkgs[@]}"; do
-        local base
-        base=$(basename "$pkg")
-        cp "$pkg" "$staging/"
-        chroot_pkgs+=("/var/cache/pacman/pkg/$base")
-        echo ":: Package: $base"
-    done
+    # --- Install local .pkg.tar.zst files ---
+    if [[ ${#abs_pkgs[@]} -gt 0 ]]; then
+        local staging="${DEV_DIR}/.install-staging"
+        rm -rf "$staging"
+        mkdir -p "$staging"
+        local chroot_pkgs=()
+        for pkg in "${abs_pkgs[@]}"; do
+            local base
+            base=$(basename "$pkg")
+            cp "$pkg" "$staging/"
+            chroot_pkgs+=("/var/cache/pacman/pkg/$base")
+            echo ":: Local package: $base"
+        done
 
-    # Install via Docker + arch-chroot
-    # Use /work mount (same pattern as cmd_create) to copy packages into $MNT,
-    # then arch-chroot to install them.
-    echo ":: Installing via Docker + arch-chroot..."
-    docker run --rm --privileged \
-        -v "$MNT":"$MNT" \
-        -v "$PROJECT_DIR:/work" \
-        "$DOCKER_IMAGE" \
-        bash -c "
-            set -euo pipefail
-            pacman -Sy --noconfirm arch-install-scripts &>/dev/null
+        echo ":: Installing local packages via Docker + arch-chroot..."
+        docker run --rm --privileged \
+            -v "$MNT":"$MNT" \
+            -v "$PROJECT_DIR:/work" \
+            "$DOCKER_IMAGE" \
+            bash -c "
+                set -euo pipefail
+                pacman -Sy --noconfirm arch-install-scripts &>/dev/null
 
-            echo ':: Copying packages into VM disk...'
-            cp -v /work/dev/.install-staging/*.pkg.tar.zst \"$MNT/var/cache/pacman/pkg/\"
+                echo ':: Copying packages into VM disk...'
+                cp -v /work/dev/.install-staging/*.pkg.tar.zst \"$MNT/var/cache/pacman/pkg/\"
 
-            echo ':: Running arch-chroot pacman -U...'
-            arch-chroot \"$MNT\" pacman -U ${chroot_pkgs[*]} --noconfirm
-        "
+                echo ':: Running arch-chroot pacman -U...'
+                arch-chroot \"$MNT\" pacman -U ${chroot_pkgs[*]} --noconfirm
+            "
+        rm -rf "$staging"
+    fi
 
-    rm -rf "$staging"
+    # --- Install repo packages ---
+    if [[ ${#repo_pkgs[@]} -gt 0 ]]; then
+        echo ":: Installing repo packages: ${repo_pkgs[*]}"
+        docker run --rm --privileged \
+            -v "$MNT":"$MNT" \
+            "$DOCKER_IMAGE" \
+            bash -c "
+                set -euo pipefail
+                pacman -Sy --noconfirm arch-install-scripts &>/dev/null
+                arch-chroot \"$MNT\" pacman -Sy --noconfirm ${repo_pkgs[*]}
+            "
+    fi
+
     umount_disk
     nbd_disconnect
     trap - EXIT
@@ -593,7 +608,7 @@ Commands:
   create    Create the dev disk and install the system (one-time, uses Docker)
   sync      Sync airootfs + boot entries to the disk (fast, seconds)
   boot      Launch the VM with QEMU/KVM + UEFI
-  install   Install .pkg.tar.zst packages into the VM (uses Docker)
+  install   Install packages into the VM: local .pkg.tar.zst or repo names (uses Docker)
   log       Tail the boot/serial log (--full for complete log)
   shell     Mount the disk for manual inspection (interactive subshell)
   destroy   Remove the dev VM disk and all artifacts

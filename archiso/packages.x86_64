@@ -73,6 +73,8 @@ nano
 git
 bash-completion
 man-db
+sudo
+openssh
 
 # Boot splash
 plymouth

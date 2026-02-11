@@ -170,7 +170,7 @@ sudo -v && ./tools/dev_vm.sh sync
 | `./tools/dev_vm.sh create` | Una vez: crear disco, pacstrap, configurar (usa Docker) |
 | `./tools/dev_vm.sh sync` | Sincronizar airootfs + boot entries + installer (segundos) |
 | `./tools/dev_vm.sh boot` | Lanzar la VM con QEMU/KVM + UEFI |
-| `./tools/dev_vm.sh install <pkg>` | Instalar paquetes .pkg.tar.zst en la VM (usa Docker) |
+| `./tools/dev_vm.sh install <pkg\|nombre>` | Instalar paquetes .pkg.tar.zst locales o del repo en la VM (usa Docker) |
 | `./tools/dev_vm.sh log` | Ver el log de arranque en tiempo real (`--full` para log completo) |
 | `./tools/dev_vm.sh shell` | Montar el disco para inspeccion manual (subshell interactivo) |
 | `./tools/dev_vm.sh destroy` | Eliminar el disco de la VM y todos los artefactos |

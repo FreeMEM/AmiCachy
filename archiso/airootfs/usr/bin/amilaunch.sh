@@ -2,10 +2,11 @@
 # AmiCachy — Profile dispatcher
 # Reads amiprofile= from kernel cmdline and launches the appropriate session.
 
-set -euo pipefail
+set -uo pipefail
 
 UAE_DIR="/usr/share/amicachy/uae"
 AMIBERRY_BIN="/usr/bin/amiberry"
+AMIBERRY_DATA_DIR="/usr/share/amiberry"
 
 # --- CPU architecture check ---
 # If the system has x86-64-v3 packages but the CPU lacks AVX2, binaries
@@ -78,12 +79,15 @@ XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
 mkdir -p "$XDG_RUNTIME_DIR"
 
-export XKB_DEFAULT_LAYOUT="us"
+# Read keyboard layout from vconsole.conf; fall back to "us"
+_keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf 2>/dev/null || echo "us")
+export XKB_DEFAULT_LAYOUT="${_keymap:-us}"
 export XDG_SESSION_TYPE="wayland"
 export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM="wayland"
+export LIBSEAT_BACKEND="logind"
 
-# --- Fallback: launch a terminal with system info if amiberry is missing ---
+# --- Fallback: launch a terminal with system info ---
 launch_fallback() {
     local reason="$1"
     echo "FALLBACK: ${reason}" >&2
@@ -95,7 +99,6 @@ launch_fallback() {
         echo '  Profile:  ${PROFILE}'
         echo '  Reason:   ${reason}'
         echo ''
-        echo '  amiberry is not installed yet.'
         echo '  The system booted correctly — this shell'
         echo '  lets you verify the environment.'
         echo ''
@@ -110,6 +113,31 @@ launch_fallback() {
     "
 }
 
+# --- Run amiberry with crash protection (prevents autologin loop) ---
+run_amiberry() {
+    local config="$1"
+    shift
+    local args=("$@" "$AMIBERRY_BIN")
+
+    # If the UAE config exists, use it; otherwise open the GUI for setup
+    if [[ -f "$config" ]]; then
+        args+=(--config "$config")
+    else
+        echo "Config not found: $config — launching Amiberry GUI" >&2
+    fi
+
+    # Amiberry expects its data directory as the working directory
+    # (controllers/, data/, whdboot/, etc. relative to cwd)
+    cd "$AMIBERRY_DATA_DIR" || true
+
+    # Run inside cage; if amiberry crashes, fall back to shell
+    cage -- "${args[@]}"
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        launch_fallback "amiberry exited with code $rc (config: $config)"
+    fi
+}
+
 # --- Dispatch based on profile ---
 case "$PROFILE" in
     installer)
@@ -117,14 +145,14 @@ case "$PROFILE" in
         ;;
     classic_68k)
         if [[ -x "$AMIBERRY_BIN" ]]; then
-            exec cage -- "$AMIBERRY_BIN" --config "${UAE_DIR}/a1200.uae"
+            run_amiberry "${UAE_DIR}/a1200.uae"
         else
             launch_fallback "amiberry not found (classic_68k)"
         fi
         ;;
     ppc_nitro)
         if [[ -x "$AMIBERRY_BIN" ]]; then
-            exec cage -- chrt -f 52 "$AMIBERRY_BIN" --config "${UAE_DIR}/os41.uae"
+            run_amiberry "${UAE_DIR}/os41.uae" chrt -f 52
         else
             launch_fallback "amiberry not found (ppc_nitro)"
         fi

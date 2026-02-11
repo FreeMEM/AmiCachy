@@ -15,6 +15,7 @@ airootfs_image_type="squashfs"
 airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
 
 file_permissions=(
+  ["/etc/sudoers.d/amiga"]="0:0:440"
   ["/usr/bin/amilaunch.sh"]="0:0:755"
   ["/usr/bin/amicachy-installer"]="0:0:755"
   ["/usr/bin/start_dev_env.sh"]="0:0:755"
