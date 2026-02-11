@@ -130,11 +130,14 @@ run_amiberry() {
     # (controllers/, data/, whdboot/, etc. relative to cwd)
     cd "$AMIBERRY_DATA_DIR" || true
 
-    # Run inside cage; if amiberry crashes, fall back to shell
-    cage -- "${args[@]}"
+    # Capture all output for debugging (readable via SSH or dev_vm.sh log)
+    local logfile="/tmp/amiberry-launch.log"
+
+    # Run inside cage; wrap amiberry in a shell to capture its stderr
+    cage -- bash -c '"${@}" 2>&1 | tee '"$logfile"'; exit ${PIPESTATUS[0]}' _ "${args[@]}"
     local rc=$?
     if [[ $rc -ne 0 ]]; then
-        launch_fallback "amiberry exited with code $rc (config: $config)"
+        launch_fallback "amiberry exited with code $rc (config: $config). Log: $logfile"
     fi
 }
 
