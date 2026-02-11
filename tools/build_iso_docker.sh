@@ -44,7 +44,7 @@ PACMAN_CONF=$(get_pacman_conf "$PROJECT_DIR/archiso/pacman.conf")
 EXTRA_DOCKER_ARGS=()
 if [[ "$PACMAN_CONF" != "$PROJECT_DIR/archiso/pacman.conf" ]]; then
     # Mount filtered pacman.conf into the container
-    EXTRA_DOCKER_ARGS=(-v "${PACMAN_CONF}:/work/archiso/pacman.conf:ro")
+    EXTRA_DOCKER_ARGS=(-v "${PACMAN_CONF}:/work/archiso/pacman.conf")
 fi
 
 echo ":: Building AmiCachy ISO in Docker container..."

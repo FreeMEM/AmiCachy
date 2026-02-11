@@ -94,6 +94,63 @@ unbundle_installer_data() {
     rm -f  "${AIROOTFS}/usr/share/amicachy/installer/pacman.conf"
 }
 
+setup_local_packages() {
+    # If amiberry (or other custom packages) have been compiled and are in out/,
+    # create a local pacman repo so mkarchiso can install them into the ISO.
+    local LOCAL_REPO="${PROFILE_DIR}/local-repo"
+    local pkgs=()
+
+    for f in "${OUT_DIR}"/amiberry-*.pkg.tar.zst; do
+        [[ -f "$f" ]] && pkgs+=("$f")
+    done
+
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
+        echo ":: WARNING: No amiberry package found in out/"
+        echo "   Build it first: ./tools/build_amiberry.sh"
+        echo "   The ISO will be built WITHOUT amiberry."
+        echo ""
+        HAS_LOCAL_REPO=0
+        return
+    fi
+
+    echo ":: Setting up local package repository..."
+    mkdir -p "$LOCAL_REPO"
+
+    # Copy the latest amiberry package
+    local latest_pkg="${pkgs[-1]}"
+    cp "$latest_pkg" "$LOCAL_REPO/"
+    echo "   -> $(basename "$latest_pkg")"
+
+    # Create repo database
+    repo-add "${LOCAL_REPO}/amicachy.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst
+
+    # Add local repo to pacman.conf
+    cat >> "${PROFILE_DIR}/pacman.conf" << EOF
+
+# --- AmiCachy Local Repo (auto-generated, removed after build) ---
+[amicachy-local]
+SigLevel = Never
+Server = file://${LOCAL_REPO}
+EOF
+
+    # Add amiberry to the package list
+    echo "amiberry" >> "${PROFILE_DIR}/packages.x86_64"
+
+    HAS_LOCAL_REPO=1
+    echo "   Local repo ready. amiberry will be included in the ISO."
+}
+
+cleanup_local_packages() {
+    if [[ "${HAS_LOCAL_REPO:-0}" -eq 1 ]]; then
+        echo ":: Cleaning local package repository..."
+        rm -rf "${PROFILE_DIR}/local-repo"
+        # Remove appended local repo section from pacman.conf
+        sed -i '/^# --- AmiCachy Local Repo/,$ d' "${PROFILE_DIR}/pacman.conf"
+        # Remove amiberry line from packages.x86_64
+        sed -i '/^amiberry$/d' "${PROFILE_DIR}/packages.x86_64"
+    fi
+}
+
 build_iso() {
     echo ":: Building ISO..."
     mkarchiso -v -w "$WORK_DIR" -o "$OUT_DIR" "$PROFILE_DIR"
@@ -117,6 +174,7 @@ check_root
 import_cachyos_keys
 [[ $CLEAN -eq 1 ]] && clean_work
 prepare_dirs
+setup_local_packages
 bundle_installer_data
-trap unbundle_installer_data EXIT
+trap 'unbundle_installer_data; cleanup_local_packages' EXIT
 build_iso

@@ -218,26 +218,42 @@ Amiberry is not available as a pre-built package in Arch/CachyOS repositories. W
 - **IPC socket** for future debug bridge (VS Code <-> Amiberry)
 
 ```bash
-# Build the amiberry .pkg.tar.zst inside Docker
+# Build the amiberry .pkg.tar.zst inside Docker (~5 min)
 ./tools/build_amiberry.sh
 
 # Output: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
 ```
 
-To install it in the dev VM:
+The PKGBUILD is at `pkg/amiberry/PKGBUILD`.
+
+#### Amiberry in the dev VM
+
+Build once, install once — the package **persists in the qcow2 disk** across reboots. You only need to reinstall if you `destroy` the VM or want to update to a newer version.
 
 ```bash
-# Option A: mount and install
+# Install (one-time, after building)
 sudo -v && ./tools/dev_vm.sh shell
 sudo pacman -U /work/out/amiberry-*.pkg.tar.zst   # /work is the project root
 exit
 
-# Option B: copy via SSH while the VM is running
+# Alternative: copy via SSH while the VM is running
 scp -P 2222 out/amiberry-*.pkg.tar.zst amiga@localhost:/tmp/
 ssh -p 2222 amiga@localhost "sudo pacman -U /tmp/amiberry-*.pkg.tar.zst"
 ```
 
-The PKGBUILD is at `pkg/amiberry/PKGBUILD`.
+#### Amiberry in the ISO
+
+When building the ISO, the build script **automatically detects** the compiled amiberry package in `out/` and includes it. No manual steps needed:
+
+```bash
+# 1. Build amiberry (if not already done)
+./tools/build_amiberry.sh
+
+# 2. Build ISO — amiberry is included automatically
+./tools/build_iso_docker.sh
+```
+
+If no amiberry package is found in `out/`, the ISO builds without it and prints a warning.
 
 ### Testing the ISO with KVM/libvirt
 
@@ -350,8 +366,9 @@ AmiCachy/
    ./tools/dev_vm.sh boot
    # In another terminal: ./tools/dev_vm.sh log
    ```
-6. **Build the full ISO** when ready for distribution:
+6. **Build the full ISO** when ready for distribution (amiberry is included automatically from `out/`):
    ```bash
-   ./tools/build_iso_docker.sh
+   ./tools/build_iso_docker.sh            # optimized for your CPU
+   ./tools/build_iso_docker.sh --generic  # universal (any x86-64)
    ```
 7. **Submit a pull request**

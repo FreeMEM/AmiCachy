@@ -218,26 +218,42 @@ Amiberry no esta disponible como paquete en los repositorios de Arch/CachyOS. Lo
 - **Socket IPC** para futuro debug bridge (VS Code <-> Amiberry)
 
 ```bash
-# Compilar el .pkg.tar.zst de amiberry dentro de Docker
+# Compilar el .pkg.tar.zst de amiberry dentro de Docker (~5 min)
 ./tools/build_amiberry.sh
 
 # Resultado: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
 ```
 
-Para instalarlo en la VM de desarrollo:
+El PKGBUILD esta en `pkg/amiberry/PKGBUILD`.
+
+#### Amiberry en la VM de desarrollo
+
+Compilar una vez, instalar una vez — el paquete **persiste en el disco qcow2** entre reinicios. Solo necesitas reinstalar si haces `destroy` de la VM o quieres actualizar a una version mas nueva.
 
 ```bash
-# Opcion A: montar e instalar
+# Instalar (una vez, despues de compilar)
 sudo -v && ./tools/dev_vm.sh shell
 sudo pacman -U /work/out/amiberry-*.pkg.tar.zst   # /work es la raiz del proyecto
 exit
 
-# Opcion B: copiar via SSH con la VM corriendo
+# Alternativa: copiar via SSH con la VM corriendo
 scp -P 2222 out/amiberry-*.pkg.tar.zst amiga@localhost:/tmp/
 ssh -p 2222 amiga@localhost "sudo pacman -U /tmp/amiberry-*.pkg.tar.zst"
 ```
 
-El PKGBUILD esta en `pkg/amiberry/PKGBUILD`.
+#### Amiberry en la ISO
+
+Al construir la ISO, el script **detecta automaticamente** el paquete compilado de amiberry en `out/` y lo incluye. No necesitas pasos manuales:
+
+```bash
+# 1. Compilar amiberry (si no lo has hecho)
+./tools/build_amiberry.sh
+
+# 2. Construir ISO — amiberry se incluye automaticamente
+./tools/build_iso_docker.sh
+```
+
+Si no se encuentra ningun paquete de amiberry en `out/`, la ISO se construye sin el y muestra un aviso.
 
 ### Probar la ISO con KVM/libvirt
 
@@ -350,8 +366,9 @@ AmiCachy/
    ./tools/dev_vm.sh boot
    # En otra terminal: ./tools/dev_vm.sh log
    ```
-6. **Construye la ISO completa** cuando este listo para distribuir:
+6. **Construye la ISO completa** cuando este listo para distribuir (amiberry se incluye automaticamente desde `out/`):
    ```bash
-   ./tools/build_iso_docker.sh
+   ./tools/build_iso_docker.sh            # optimizada para tu CPU
+   ./tools/build_iso_docker.sh --generic  # universal (cualquier x86-64)
    ```
 7. **Envia un pull request**
