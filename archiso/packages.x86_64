@@ -76,6 +76,9 @@ git
 bash-completion
 man-db
 
+# Boot splash
+plymouth
+
 # Installer & audit dependencies
 parted
 gptfdisk

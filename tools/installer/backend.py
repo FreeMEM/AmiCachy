@@ -324,7 +324,34 @@ def configure_system(runner: CommandRunner) -> None:
     # Enable NetworkManager
     runner.run_chroot(["systemctl", "enable", "NetworkManager"])
 
-    # Regenerate initramfs
+    # Plymouth boot splash
+    plymouth_theme = f"{mnt}/usr/share/plymouth/themes/amicachyenv"
+    plymouth_src = "/usr/share/plymouth/themes/amicachyenv"
+    if Path(plymouth_src).is_dir():
+        shutil.copytree(plymouth_src, plymouth_theme, dirs_exist_ok=True)
+    _write_file(
+        f"{mnt}/etc/plymouth/plymouthd.conf",
+        "[Daemon]\nTheme=amicachyenv\nShowDelay=0\nDeviceTimeout=5\n",
+    )
+    # mkinitcpio with plymouth hook
+    _write_file(
+        f"{mnt}/etc/mkinitcpio.conf",
+        "MODULES=()\nBINARIES=()\nFILES=()\n"
+        "HOOKS=(base udev plymouth autodetect modconf kms block filesystems keyboard)\n",
+    )
+    # Plymouth systemd services
+    for wants_dir, service in [
+        ("sysinit.target.wants", "plymouth-start.service"),
+        ("multi-user.target.wants", "plymouth-quit.service"),
+        ("multi-user.target.wants", "plymouth-quit-wait.service"),
+    ]:
+        link_dir = f"{mnt}/etc/systemd/system/{wants_dir}"
+        Path(link_dir).mkdir(parents=True, exist_ok=True)
+        link_path = Path(f"{link_dir}/{service}")
+        if not link_path.exists():
+            link_path.symlink_to(f"/usr/lib/systemd/system/{service}")
+
+    # Regenerate initramfs (with plymouth hook now active)
     runner.run_chroot(["mkinitcpio", "-P"])
 
 

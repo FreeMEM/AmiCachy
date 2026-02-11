@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AmiCachyEnv
+Description=Amiga-themed boot splash for AmiCachyEnv
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/amicachyenv
+ScriptFile=/usr/share/plymouth/themes/amicachyenv/amicachyenv.script

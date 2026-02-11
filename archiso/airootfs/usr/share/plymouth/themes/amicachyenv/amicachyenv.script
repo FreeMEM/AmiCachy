@@ -1,0 +1,68 @@
+// AmiCachyEnv Plymouth theme — logo + rotating Amiga rainbow spinner
+
+// --- Background ---
+Window.SetBackgroundTopColor(0.10, 0.10, 0.18);
+Window.SetBackgroundBottomColor(0.08, 0.08, 0.14);
+
+// --- Logo (centered, upper half) ---
+logo.image = Image("logo.png");
+logo.scaled = logo.image.Scale(
+    Window.GetWidth() * 0.35,
+    Window.GetWidth() * 0.35 * logo.image.GetHeight() / logo.image.GetWidth()
+);
+logo.sprite = Sprite(logo.scaled);
+logo.sprite.SetPosition(
+    Window.GetWidth()  / 2 - logo.scaled.GetWidth()  / 2,
+    Window.GetHeight() / 2 - logo.scaled.GetHeight() / 2 - Window.GetHeight() * 0.05,
+    10000
+);
+logo.sprite.SetOpacity(1);
+
+// --- Spinner (rotating arc below logo) ---
+spinner.image = Image("spinner.png");
+spinner.sprite = Sprite();
+spinner.angle = 0;
+spinner.count = 64;
+
+// Pre-compute rotated frames
+for (i = 0; i < spinner.count; i++) {
+    spinner.cache[i] = spinner.image.Rotate(Math.Pi * 2 * i / spinner.count);
+}
+
+spinner_x = Window.GetWidth()  / 2 - spinner.image.GetWidth()  / 2;
+spinner_y = Window.GetHeight() / 2 + logo.scaled.GetHeight() / 2 + 20;
+
+spinner.sprite.SetPosition(spinner_x, spinner_y, 10000);
+
+// --- Message text ---
+message.sprite = Sprite();
+message.sprite.SetPosition(0, 0, -1);
+
+// --- Refresh callback (~50fps) ---
+fun refresh_callback() {
+    spinner.angle++;
+    if (spinner.angle >= spinner.count)
+        spinner.angle = 0;
+    spinner.sprite.SetImage(spinner.cache[spinner.angle]);
+}
+
+// --- Message callback ---
+fun message_callback(text) {
+    text_image = Image.Text(text, 0.7, 0.7, 0.7);
+    message.sprite.SetImage(text_image);
+    message.sprite.SetPosition(
+        Window.GetWidth()  / 2 - text_image.GetWidth() / 2,
+        Window.GetHeight() * 0.92,
+        10000
+    );
+}
+
+// --- Quit callback ---
+fun quit_callback() {
+    spinner.sprite.SetOpacity(0);
+    message.sprite.SetOpacity(0);
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+Plymouth.SetMessageFunction(message_callback);
+Plymouth.SetQuitFunction(quit_callback);
