@@ -1,6 +1,7 @@
 # Build artifacts
 out/
 work/
+dev/
 *.iso
 
 # Amiga ROMs and proprietary files
