@@ -1,11 +1,12 @@
-; AmiCachy — Amiberry A1200 configuration (placeholder)
-; Replace kickstart and disk paths with your own files.
+; AmiCachy — Amiga 1200 with AROS Kickstart
+; AROS is a free, open-source AmigaOS-compatible ROM included with Amiberry.
+; Replace with original Kickstart 3.1 ROM for full compatibility.
 
-config_description=AmiCachy Classic A1200
+config_description=AmiCachy Classic A1200 (AROS)
 config_hardware=aga
 config_host=
 
-; Hardware
+; Hardware — A1200 with 8 MB Fast RAM
 chipset=aga
 chipmem_size=4
 bogomem_size=0
@@ -15,9 +16,9 @@ cpu_speed=real
 cpu_compatible=true
 cycle_exact=false
 
-; Kickstart
-kickstart_rom_file=/home/amiga/kickstarts/kick31.rom
-kickstart_ext_rom_file=
+; Kickstart — AROS (free, bundled with Amiberry)
+kickstart_rom_file=/usr/share/amiberry/roms/aros-rom.bin
+kickstart_ext_rom_file=/usr/share/amiberry/roms/aros-ext.bin
 
 ; Display
 gfx_width=720
@@ -29,8 +30,7 @@ sound_output=exact
 sound_channels=stereo
 sound_frequency=44100
 
-; Floppy
-floppy0=/home/amiga/disks/workbench31.adf
+; Floppy — empty (AROS boots from ROM)
 floppy_speed=100
 
 ; Input

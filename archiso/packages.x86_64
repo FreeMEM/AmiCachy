@@ -60,6 +60,7 @@ libserialport
 portmidi
 enet
 tinyxml2
+gnu-free-fonts
 
 # Development profile
 code
@@ -75,6 +76,7 @@ bash-completion
 man-db
 sudo
 openssh
+terminus-font
 
 # Boot splash
 plymouth

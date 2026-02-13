@@ -4,9 +4,13 @@
 
 set -uo pipefail
 
+# Clear the VT immediately to avoid flashing the login prompt
+# between Plymouth quit and Cage startup.
+clear
+
 UAE_DIR="/usr/share/amicachy/uae"
 AMIBERRY_BIN="/usr/bin/amiberry"
-AMIBERRY_DATA_DIR="/usr/share/amiberry"
+AMIBERRY_HOME="/usr/share/amiberry"
 
 # --- CPU architecture check ---
 # If the system has x86-64-v3 packages but the CPU lacks AVX2, binaries
@@ -83,9 +87,24 @@ mkdir -p "$XDG_RUNTIME_DIR"
 _keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf 2>/dev/null || echo "us")
 export XKB_DEFAULT_LAYOUT="${_keymap:-us}"
 export XDG_SESSION_TYPE="wayland"
+export SDL_VIDEODRIVER="wayland"
 export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM="wayland"
 export LIBSEAT_BACKEND="logind"
+
+# Workaround: virtio-gpu hardware cursors are upside-down in wlroots compositors
+# (QEMU bug #2315). Force software cursors. Safe to set on real hardware too.
+export WLR_NO_HARDWARE_CURSORS=1
+
+# sdl2-compat debug (CachyOS ships sdl2-compat over real SDL2)
+export SDL2COMPAT_DEBUG_LOGGING=1
+
+# Use real SDL2 library if available (bypasses sdl2-compat).
+# sdl2-compat has known cursor bugs on Wayland: inverted cursor,
+# wrong position offset, and mouse acceleration issues.
+if [[ -f /usr/local/lib/libSDL2-2.0.so.0 ]]; then
+    export SDL_DYNAMIC_API="/usr/local/lib/libSDL2-2.0.so.0"
+fi
 
 # --- Fallback: launch a terminal with system info ---
 launch_fallback() {
@@ -119,16 +138,18 @@ run_amiberry() {
     shift
     local args=("$@" "$AMIBERRY_BIN")
 
-    # If the UAE config exists, use it; otherwise open the GUI for setup
+    # If the UAE config exists, load it and start emulation directly.
+    # use_gui=no skips the setup GUI; F12 still opens it during emulation.
+    # Without a config, open the GUI for manual setup.
     if [[ -f "$config" ]]; then
-        args+=(--config "$config")
+        args+=(--config "$config" -s use_gui=no)
     else
         echo "Config not found: $config — launching Amiberry GUI" >&2
     fi
 
-    # Amiberry expects its data directory as the working directory
-    # (controllers/, data/, whdboot/, etc. relative to cwd)
-    cd "$AMIBERRY_DATA_DIR" || true
+    # Amiberry expects its install root as the working directory
+    # (data/, controllers/, whdboot/, etc. relative to cwd)
+    cd "$AMIBERRY_HOME" || true
 
     # Capture all output for debugging (readable via SSH or dev_vm.sh log)
     local logfile="/tmp/amiberry-launch.log"

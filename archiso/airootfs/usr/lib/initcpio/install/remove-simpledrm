@@ -1,0 +1,16 @@
+#!/bin/bash
+# mkinitcpio install hook: remove-simpledrm
+# Unbinds simpledrm before Plymouth starts so Plymouth renders on the
+# real GPU (virtio_gpu in VMs, or the primary PCI GPU on bare metal).
+
+build() {
+    add_runscript
+}
+
+help() {
+    cat <<HELPEOF
+Unbinds simpledrm from the UEFI simple-framebuffer device in early
+userspace. This prevents Plymouth from rendering on simpledrm (card0)
+when the actual display is driven by a different GPU (e.g. virtio_gpu).
+HELPEOF
+}

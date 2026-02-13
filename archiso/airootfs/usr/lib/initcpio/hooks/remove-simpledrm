@@ -1,0 +1,11 @@
+#!/usr/bin/ash
+# mkinitcpio runtime hook: remove-simpledrm
+# Runs after kms (GPU modules loaded) but before plymouth.
+# The simpledrm driver registers with name "simple-framebuffer" in sysfs.
+
+run_hook() {
+    local drv="/sys/bus/platform/drivers/simple-framebuffer"
+    if [ -e "$drv/unbind" ] && [ -d "$drv/simple-framebuffer.0" ]; then
+        echo simple-framebuffer.0 > "$drv/unbind" 2>/dev/null
+    fi
+}

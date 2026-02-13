@@ -1,0 +1,12 @@
+[Unit]
+Description=Load virtio_gpu after Plymouth
+After=plymouth-quit-wait.service
+Before=getty.target
+
+[Service]
+Type=oneshot
+ExecStart=-/sbin/modprobe virtio_gpu
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
