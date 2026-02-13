@@ -106,6 +106,13 @@ if [[ -f /usr/local/lib/libSDL2-2.0.so.0 ]]; then
     export SDL_DYNAMIC_API="/usr/local/lib/libSDL2-2.0.so.0"
 fi
 
+# --- Early Startup Control (hold F5 during boot) ---
+if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" ]]; then
+    if python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
+        cage -- /usr/bin/amicachy-earlystartup 2>/dev/null
+    fi
+fi
+
 # --- Fallback: launch a terminal with system info ---
 launch_fallback() {
     local reason="$1"

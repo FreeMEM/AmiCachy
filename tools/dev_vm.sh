@@ -148,9 +148,16 @@ sync_files() {
     sudo cp "$PROJECT_DIR/tools/hardware_audit.py" \
         "$MNT/usr/share/amicachy/tools/"
 
+    # 3b. Early Startup Control tools
+    echo ":: Syncing earlystartup tools..."
+    sudo mkdir -p "$MNT/usr/share/amicachy/tools/earlystartup"
+    sudo rsync -a "$PROJECT_DIR/tools/earlystartup/" \
+        "$MNT/usr/share/amicachy/tools/earlystartup/"
+
     # 4. Fix permissions for executable scripts
     sudo chmod 755 "$MNT/usr/bin/amilaunch.sh" \
                     "$MNT/usr/bin/amicachy-installer" \
+                    "$MNT/usr/bin/amicachy-earlystartup" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
 
     # 5. Fix ownership: rsync -a preserves host uid which maps to amiga (1000)
@@ -355,7 +362,7 @@ cmd_create() {
 
                 # Create user amiga (may already exist from sysusers)
                 if ! id amiga &>/dev/null; then
-                    useradd -m -u 1000 -G wheel,audio,video -s /bin/bash amiga
+                    useradd -m -u 1000 -G wheel,audio,video,input -s /bin/bash amiga
                 fi
                 echo \"amiga:amiga\" | chpasswd
             '
