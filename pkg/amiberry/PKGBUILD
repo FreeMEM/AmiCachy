@@ -8,8 +8,8 @@
 
 pkgname=amiberry
 pkgver=7.1.1
-pkgrel=1
-pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, LTO)"
+pkgrel=2
+pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, debug)"
 arch=('x86_64')
 url="https://github.com/BlitterStudio/amiberry"
 license=('GPL-3.0-or-later')
@@ -26,15 +26,15 @@ provides=("amiberry=${pkgver}")
 conflicts=('amiberry-git' 'amiberry-lite')
 source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}")
 sha256sums=('SKIP')
-options=('!lto')  # LTO handled by CMake WITH_LTO, not makepkg
+options=('!lto' '!strip')  # Keep debug symbols, no LTO for debugging
 
 build() {
     cd "${pkgname}"
     cmake -B build \
         -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DWITH_LTO=ON \
+        -DWITH_LTO=OFF \
         -DUSE_DBUS=ON \
         -DUSE_ZSTD=ON \
         -DUSE_IPC_SOCKET=ON
