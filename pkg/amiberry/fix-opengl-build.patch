@@ -1,5 +1,5 @@
 diff --git a/src/osdep/amiberry_gfx.cpp b/src/osdep/amiberry_gfx.cpp
-index 3253a93..858b6a6 100644
+index 3253a93..36235ba 100644
 --- a/src/osdep/amiberry_gfx.cpp
 +++ b/src/osdep/amiberry_gfx.cpp
 @@ -53,12 +53,6 @@
@@ -87,7 +87,7 @@ index 3253a93..858b6a6 100644
  #endif //AMIBERRY
  
  int gfx_IsPicassoScreen(const struct AmigaMonitor* mon)
-@@ -1141,13 +1149,57 @@ void show_screen(const int monid, int mode)
+@@ -1141,13 +1149,53 @@ void show_screen(const int monid, int mode)
  		return;
  	}
  #ifdef USE_OPENGL
@@ -96,28 +96,22 @@ index 3253a93..858b6a6 100644
 -	if (crtemu_tv) {
 -		crtemu_present(crtemu_tv, time, (CRTEMU_U32 const*)amiga_surface->pixels,
 -			crop_rect.w, crop_rect.h, 0xffffffff, 0x000000);
--	}
 +	if (amiga_surface) {
 +		Uint32* px = (Uint32*)amiga_surface->pixels;
 +		int pitch_px = amiga_surface->pitch / 4;
 +		int crop_w = (crop_rect.w > 0 && crop_rect.w <= amiga_surface->w) ? crop_rect.w : 754;
 +		int crop_h = (crop_rect.h > 0 && crop_rect.h <= amiga_surface->h) ? crop_rect.h : 574;
 +
-+		// Fix alpha channel — Wayland compositors require 0xFF for opaque pixels
-+		for (int y = crop_rect.y; y < crop_rect.y + crop_h; y++) {
-+			Uint32* row = &px[y * pitch_px + crop_rect.x];
-+			for (int x = 0; x < crop_w; x++) {
-+				row[x] |= 0xFF000000;
-+			}
-+		}
- 
 +		int win_w, win_h;
 +		SDL_GL_GetDrawableSize(mon->amiga_window, &win_w, &win_h);
 +		glViewport(0, 0, win_w, win_h);
 +
++		// Clear with alpha=1.0, then block alpha writes so the texture's
++		// alpha=0 doesn't reach the compositor (Wayland requires opaque).
 +		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 +		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 +		glClear(GL_COLOR_BUFFER_BIT);
++		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 +		glUseProgram(0);
 +		glActiveTexture(GL_TEXTURE0);
 +
@@ -147,11 +141,13 @@ index 3253a93..858b6a6 100644
 +		glTexCoord2f(0, 1); glVertex2f(0, 1);
 +		glEnd();
 +		glDisable(GL_TEXTURE_2D);
-+	}
++		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+ 	}
+-
  	SDL_GL_SwapWindow(mon->amiga_window);
  #else
  	SDL2_showframe(monid);
-@@ -2600,6 +2652,10 @@ void close_windows(struct AmigaMonitor* mon)
+@@ -2600,6 +2648,10 @@ void close_windows(struct AmigaMonitor* mon)
  
  #ifdef USE_OPENGL
  	destroy_crtemu();
@@ -162,7 +158,7 @@ index 3253a93..858b6a6 100644
  #else
  	if (amiga_texture)
  	{
-@@ -2720,9 +2776,9 @@ bool target_graphics_buffer_update(const int monid, const bool force)
+@@ -2720,9 +2772,9 @@ bool target_graphics_buffer_update(const int monid, const bool force)
  			}
  		}
  #ifdef USE_OPENGL
@@ -174,7 +170,7 @@ index 3253a93..858b6a6 100644
  #else
  		if (mon->amiga_renderer) {
  			if (amiberry_options.rotation_angle == 0 || amiberry_options.rotation_angle == 180) {
-@@ -2777,15 +2833,15 @@ bool target_graphics_buffer_update(const int monid, const bool force)
+@@ -2777,15 +2829,15 @@ bool target_graphics_buffer_update(const int monid, const bool force)
  		}
  #ifdef USE_OPENGL
  		if (!currprefs.gfx_auto_crop && !currprefs.gfx_manual_crop) {
@@ -193,7 +189,7 @@ index 3253a93..858b6a6 100644
  #else
  		if (mon->amiga_renderer)
  		{
-@@ -3044,13 +3100,6 @@ void toggle_fullscreen(const int monid, const int mode)
+@@ -3044,13 +3096,6 @@ void toggle_fullscreen(const int monid, const int mode)
  
  void destroy_crtemu()
  {
@@ -207,7 +203,7 @@ index 3253a93..858b6a6 100644
  }
  
  void graphics_subshutdown()
-@@ -3120,7 +3169,7 @@ void auto_crop_image()
+@@ -3120,7 +3165,7 @@ void auto_crop_image()
  			height = sdl_mode.h;
  		}
  #ifdef USE_OPENGL
