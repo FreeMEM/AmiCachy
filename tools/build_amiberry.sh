@@ -42,8 +42,9 @@ docker run --rm \
     bash -c '
         set -euo pipefail
 
-        echo ":: Installing build tools..."
-        pacman -Sy --noconfirm base-devel git cmake ninja
+        echo ":: Updating system and installing build tools..."
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm --needed base-devel git cmake ninja
 
         # Create non-root builder (makepkg refuses to run as root)
         useradd -m builder

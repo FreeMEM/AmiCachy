@@ -24,6 +24,7 @@ kickstart_ext_rom_file=/usr/share/amiberry/roms/aros-ext.bin
 gfx_width=720
 gfx_height=568
 gfx_fullscreen_amiga=true
+amiberry.gfx_auto_crop=true
 
 ; Sound
 sound_output=exact

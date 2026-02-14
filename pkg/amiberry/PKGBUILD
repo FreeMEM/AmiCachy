@@ -9,7 +9,7 @@
 pkgname=amiberry
 pkgver=7.1.1
 pkgrel=2
-pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, debug)"
+pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, OpenGL)"
 arch=('x86_64')
 url="https://github.com/BlitterStudio/amiberry"
 license=('GPL-3.0-or-later')
@@ -18,15 +18,21 @@ depends=(
     'flac' 'mpg123' 'libmpeg2'
     'libserialport' 'portmidi'
     'enet' 'libpcap' 'tinyxml2'
-    'zstd' 'dbus'
+    'zstd' 'dbus' 'glew'
     'hicolor-icon-theme'
 )
 makedepends=('git' 'cmake' 'ninja')
 provides=("amiberry=${pkgver}")
 conflicts=('amiberry-git' 'amiberry-lite')
-source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}")
-sha256sums=('SKIP')
+source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}"
+        'fix-opengl-build.patch')
+sha256sums=('SKIP' 'SKIP')
 options=('!lto' '!strip')  # Keep debug symbols, no LTO for debugging
+
+prepare() {
+    cd "${pkgname}"
+    patch -Np1 -i "${srcdir}/fix-opengl-build.patch"
+}
 
 build() {
     cd "${pkgname}"
@@ -35,6 +41,7 @@ build() {
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DWITH_LTO=OFF \
+        -DUSE_OPENGL=ON \
         -DUSE_DBUS=ON \
         -DUSE_ZSTD=ON \
         -DUSE_IPC_SOCKET=ON
