@@ -3,7 +3,7 @@
 # The Soul of AmiCachy
 
 ## 1. The Mission: "The Ultimate Amiga on PC"
-This project is not "a Linux distro with an emulator". The goal is to create an evolved fork of AmiBootEnv that transforms a modern PC into a high-performance Amiga workstation. We want the user to forget there's a Linux kernel underneath; the system should behave like a dedicated appliance (console-style or Android-like).
+This project is not "a Linux distro with an emulator". The goal is to build a CachyOS-based system that transforms a modern PC into a high-performance Amiga workstation. We want the user to forget there's a Linux kernel underneath; the system should behave like a dedicated appliance (console-style or Android-like).
 
 ## 2. Why CachyOS Instead of Debian/Standard Arch?
 Most projects use Debian for stability, but we prioritize latency and raw power.
