@@ -45,7 +45,9 @@ find_ovmf_code() {
         /usr/share/OVMF/OVMF_CODE_4M.fd \
         /usr/share/OVMF/OVMF_CODE.fd \
         /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /usr/share/edk2-ovmf/x64/OVMF_CODE.fd; do
+        /usr/share/edk2-ovmf/x64/OVMF_CODE.fd \
+        /usr/share/edk2/x64/OVMF_CODE.4m.fd \
+        /usr/share/edk2/x64/OVMF_CODE.fd; do
         [[ -f "$f" ]] && echo "$f" && return 0
     done
     die "OVMF firmware not found. Install the 'ovmf' or 'edk2-ovmf' package."
@@ -56,7 +58,9 @@ find_ovmf_vars() {
         /usr/share/OVMF/OVMF_VARS_4M.fd \
         /usr/share/OVMF/OVMF_VARS.fd \
         /usr/share/edk2/ovmf/OVMF_VARS.fd \
-        /usr/share/edk2-ovmf/x64/OVMF_VARS.fd; do
+        /usr/share/edk2-ovmf/x64/OVMF_VARS.fd \
+        /usr/share/edk2/x64/OVMF_VARS.4m.fd \
+        /usr/share/edk2/x64/OVMF_VARS.fd; do
         [[ -f "$f" ]] && echo "$f" && return 0
     done
     die "OVMF_VARS not found. Install the 'ovmf' or 'edk2-ovmf' package."
@@ -481,9 +485,38 @@ cmd_boot() {
     echo "   SSH:  ssh -p 2222 amiga@localhost (password: amiga)"
     echo ""
     echo "   Tip: In another terminal, run: $0 log"
+    echo "   Ctrl+C sends ACPI shutdown (clean). Close window also works."
     echo ""
 
-    qemu-system-x86_64 \
+    # QMP socket for sending ACPI shutdown on Ctrl+C instead of killing QEMU
+    local QMP_SOCK="${DEV_DIR}/qmp.sock"
+    rm -f "$QMP_SOCK"
+
+    # Helper: send QMP command via Python (no socat dependency)
+    _qmp_send() {
+        python3 -c "
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX)
+try:
+    s.settimeout(3)
+    s.connect('$QMP_SOCK')
+    s.recv(4096)  # greeting
+    s.send(b'{\"execute\": \"qmp_capabilities\"}\n')
+    s.recv(4096)  # response
+    for cmd in sys.argv[1:]:
+        s.send(('{\"execute\": \"' + cmd + '\"}\n').encode())
+        s.recv(4096)
+    s.close()
+except Exception as e:
+    print(f'QMP: {e}', file=sys.stderr)
+    sys.exit(1)
+" "$@"
+    }
+
+    # Run QEMU in its own session (setsid) so Ctrl+C does NOT reach it.
+    # Our trap handler sends ACPI shutdown via QMP instead.
+    # -w: wait for child even if setsid forks (PG leader case).
+    setsid -w qemu-system-x86_64 \
         -enable-kvm \
         -machine q35 \
         -cpu host \
@@ -491,7 +524,7 @@ cmd_boot() {
         -smp "$CPUS" \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive file="$DISK",format=qcow2,if=virtio \
+        -drive file="$DISK",format=qcow2,if=virtio,cache=writethrough \
         -device "$VGA_DEVICE" \
         $DISPLAY_ARGS \
         -device virtio-net-pci,netdev=net0 \
@@ -501,7 +534,40 @@ cmd_boot() {
         -device hda-duplex,audiodev=snd0 \
         -serial file:"$BOOT_LOG" \
         -usb \
-        -device usb-tablet
+        -device usb-tablet \
+        -qmp unix:"$QMP_SOCK",server,nowait &
+
+    local QEMU_PID=$!
+
+    # Wait for QMP socket and negotiate capabilities
+    local _tries=0
+    while [[ ! -S "$QMP_SOCK" && $_tries -lt 20 ]]; do
+        sleep 0.25
+        ((_tries++))
+    done
+    _qmp_send >/dev/null 2>&1  # capabilities handshake (no extra command)
+
+    # Trap Ctrl+C: send ACPI powerdown instead of killing QEMU instantly.
+    # QEMU is in its own session (setsid) so it does NOT receive the SIGINT.
+    # Second Ctrl+C force-kills QEMU.
+    trap '
+        echo ""
+        echo ":: Sending ACPI shutdown to guest (clean powerdown)..."
+        if _qmp_send system_powerdown 2>/dev/null; then
+            echo "   Waiting for VM to power off... (Ctrl+C again to force kill)"
+            trap "echo \"   Force killing QEMU.\"; kill '"$QEMU_PID"' 2>/dev/null" INT
+        else
+            echo "   QMP failed — killing QEMU directly."
+            kill '"$QEMU_PID"' 2>/dev/null
+        fi
+    ' INT TERM
+
+    # Wait in a loop: trap interrupts wait, but we re-wait until QEMU exits.
+    while kill -0 "$QEMU_PID" 2>/dev/null; do
+        wait "$QEMU_PID" 2>/dev/null
+    done
+    rm -f "$QMP_SOCK"
+    trap - INT TERM
 }
 
 # ---------------------------------------------------------------------------
