@@ -9,6 +9,9 @@ set -uo pipefail
 clear
 
 UAE_DIR="/usr/share/amicachy/uae"
+SAVED_UAE="/home/amiga/Amiberry/conf/amicachy-default.uae"
+SESSION_CONFIG="/tmp/amicachy-session-config"
+BOOT_CONFIG="/home/amiga/Amiberry/conf/amicachy-boot-config"
 AMIBERRY_BIN="/usr/bin/amiberry"
 AMIBERRY_HOME="/usr/share/amiberry"
 
@@ -107,9 +110,17 @@ if [[ -f /usr/local/lib/libSDL2-2.0.so.0 ]]; then
 fi
 
 # --- Early Startup Control (hold F5 during boot) ---
+EARLY_STARTUP_UAE=""
 if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" ]]; then
     if python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
         cage -- /usr/bin/amicachy-earlystartup 2>/dev/null
+        if [[ $? -eq 0 && -f "$SESSION_CONFIG" ]]; then
+            _ref=$(<"$SESSION_CONFIG")
+            _ref="${_ref%$'\n'}"
+            if [[ -f "$_ref" ]]; then
+                EARLY_STARTUP_UAE="$_ref"
+            fi
+        fi
     fi
 fi
 
@@ -176,7 +187,22 @@ case "$PROFILE" in
         ;;
     classic_68k)
         if [[ -x "$AMIBERRY_BIN" ]]; then
-            run_amiberry "${UAE_DIR}/a1200.uae"
+            if [[ -n "$EARLY_STARTUP_UAE" ]]; then
+                run_amiberry "$EARLY_STARTUP_UAE"
+            elif [[ -f "$BOOT_CONFIG" ]]; then
+                _bref=$(<"$BOOT_CONFIG")
+                _bref="${_bref%$'\n'}"
+                if [[ -f "$_bref" ]]; then
+                    run_amiberry "$_bref"
+                else
+                    run_amiberry "${UAE_DIR}/a1200.uae"
+                fi
+            elif [[ -f "$SAVED_UAE" ]]; then
+                # Legacy fallback
+                run_amiberry "$SAVED_UAE"
+            else
+                run_amiberry "${UAE_DIR}/a1200.uae"
+            fi
         else
             launch_fallback "amiberry not found (classic_68k)"
         fi
