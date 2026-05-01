@@ -230,6 +230,33 @@ _UAE_BOILERPLATE = (
     "joyport1=joy1",
 )
 
+# filesystem-bundle assets need a different boilerplate. The combo of
+# Amiberry + cage + sdl2-compat tiles the framebuffer horizontally when
+# rendering RTG over a dir-mount: the user sees the same Workbench drawn
+# twice side by side. gfx_api=opengl + autoscale=resize + autodetected
+# fullscreen size sidesteps that. filesys_no_fsdb avoids the _UAEFSDB.___
+# clutter that confuses some Amiga utilities. bootpri=127 (instead of 0)
+# is what stops AROS from treating filesystem2= and uaehf0= as two
+# competing DH0 volumes.
+_UAE_BOILERPLATE_FS = (
+    "gfx_api=opengl",
+    "amiberry.gfx_auto_crop=false",
+    "gfx_filter_autoscale=resize",
+    "gfx_filter_bilinear=true",
+    "gfx_filter_horiz_zoom_multf=0.000000",
+    "gfx_filter_vert_zoom_multf=0.000000",
+    "gfx_width_fullscreen=0",
+    "gfx_height_fullscreen=0",
+    "gfx_fullscreen_amiga=true",
+    "sound_output=exact",
+    "sound_channels=stereo",
+    "sound_frequency=44100",
+    "joyport0=mouse",
+    "joyport1=none",
+    "filesys_no_fsdb=true",
+    "filesys_max_size=972800",
+)
+
 
 def _render_template_lines(template: dict, ctx: dict[str, str]) -> list[str]:
     """Serialize a uae_template dict into 'key=value' lines, with placeholder
@@ -280,10 +307,17 @@ def render_uae_template_fs(
     laid out on disk) instead of a hardfile image. AROS Vision is the
     poster child for this mode.
 
-    We emit only `uaehf0=dir,…` and deliberately skip the legacy
-    `filesystem2=…` line: when both are present some AROS bundles see
-    two separate DH0 volumes and boot Workbench twice (the screen ends
-    up duplicated side-by-side). uaehf0 alone is enough for Amiberry.
+    Both filesystem2= and uaehf0=dir,… are emitted, with bootpri=127. A
+    bootpri of 0 makes AROS see them as two competing DH0 volumes and
+    boot Workbench twice (one over the other). 127 is high enough that
+    the resolver picks one and discards the duplicate.
+
+    The accompanying _UAE_BOILERPLATE_FS forces gfx_api=opengl plus the
+    autoscale filters: without them the rendered framebuffer gets tiled
+    horizontally on cage's larger surface, looking like two side-by-side
+    Workbench screens (the bug only triggers on dir-mount + RTG; HDF +
+    RTG is fine). Bundles requiring RTG should therefore ship a hardfile
+    rather than a deployed filesystem until that path is fixed upstream.
     """
     ctx = {
         "EXTRACT_ROOT": str(extract_root),
@@ -291,9 +325,10 @@ def render_uae_template_fs(
         "VOLUME": volume_name,
     }
     lines = _render_template_lines(template, ctx)
-    spec = f"rw,DH0:{volume_name}:{fs_root},0"
+    spec = f"rw,DH0:{volume_name}:{fs_root},127"
+    lines.append(f"filesystem2={spec}")
     lines.append(f"uaehf0=dir,{spec}")
-    lines.extend(_UAE_BOILERPLATE)
+    lines.extend(_UAE_BOILERPLATE_FS)
     return "\n".join(lines) + "\n"
 
 
