@@ -184,4 +184,34 @@ QFrame#amigaSection {
     border-right: 2px solid #ffffff;
     padding: 10px;
 }
+
+QMenu {
+    background-color: #b0b0b0;
+    border-top: 2px solid #ffffff;
+    border-left: 2px solid #ffffff;
+    border-bottom: 2px solid #000000;
+    border-right: 2px solid #000000;
+    padding: 2px;
+    color: #000000;
+}
+
+QMenu::item {
+    padding: 6px 24px 6px 16px;
+    background-color: transparent;
+}
+
+QMenu::item:selected {
+    background-color: #3b67a2;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: #666666;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #555555;
+    margin: 4px 6px;
+}
 """
