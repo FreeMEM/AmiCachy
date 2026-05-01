@@ -105,6 +105,38 @@ QComboBox QAbstractItemView {
     border: 1px solid #000000;
 }
 
+QComboBox:disabled {
+    background-color: #959595;
+    color: #666666;
+    border-top: 2px solid #b0b0b0;
+    border-left: 2px solid #b0b0b0;
+    border-bottom: 2px solid #555555;
+    border-right: 2px solid #555555;
+}
+
+QComboBox::drop-down:disabled {
+    background-color: #959595;
+    border-left: 2px solid #555555;
+}
+
+QComboBox::down-arrow:disabled {
+    border-top: 6px solid #666666;
+}
+
+QCheckBox:disabled {
+    color: #666666;
+}
+
+QCheckBox::indicator:disabled {
+    background-color: #959595;
+    border: 2px solid #666666;
+}
+
+QLabel:disabled,
+QLabel#sectionTitle:disabled {
+    color: #666666;
+}
+
 QRadioButton {
     spacing: 6px;
     color: #000000;
