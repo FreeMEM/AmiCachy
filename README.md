@@ -364,3 +364,11 @@ AmiCachy/
    ./tools/build_iso_docker.sh --generic  # universal (any x86-64)
    ```
 7. **Submit a pull request**
+
+## License
+
+AmiCachy is released under the GNU General Public License v3.0 — see [LICENSE](LICENSE) for the full text.
+
+Copyright (C) 2026 Francisco Antonio Tapias Bravo (FreeMEM)
+
+Third-party components retain their original licenses (Amiberry, AROS, CachyOS packages, Plymouth themes, etc.). Optional bundles fetched at runtime through the Asset Manager (e.g. AROS Vision) are governed by their own upstream licenses, shown to the user before download.
