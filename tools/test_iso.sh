@@ -41,10 +41,10 @@ find_iso() {
 }
 
 destroy_vm() {
-    if virsh list --all --name 2>/dev/null | grep -q "^${VM_NAME}$"; then
+    if virsh --connect qemu:///system list --all --name 2>/dev/null | grep -q "^${VM_NAME}$"; then
         echo ":: Destroying existing VM '${VM_NAME}'..."
-        virsh destroy "$VM_NAME" 2>/dev/null || true
-        virsh undefine "$VM_NAME" --nvram --remove-all-storage 2>/dev/null || true
+        virsh --connect qemu:///system destroy "$VM_NAME" 2>/dev/null || true
+        virsh --connect qemu:///system undefine "$VM_NAME" --nvram --remove-all-storage 2>/dev/null || true
     fi
 }
 
@@ -103,7 +103,10 @@ OVMF_CODE=""
 for candidate in \
     /usr/share/OVMF/OVMF_CODE_4M.fd \
     /usr/share/OVMF/OVMF_CODE.fd \
-    /usr/share/edk2/ovmf/OVMF_CODE.fd; do
+    /usr/share/edk2/ovmf/OVMF_CODE.fd \
+    /usr/share/edk2-ovmf/x64/OVMF_CODE.fd \
+    /usr/share/edk2/x64/OVMF_CODE.4m.fd \
+    /usr/share/edk2/x64/OVMF_CODE.fd; do
     if [[ -f "$candidate" ]]; then
         OVMF_CODE="$candidate"
         break
@@ -119,6 +122,7 @@ echo ":: Creating VM with UEFI boot..."
 echo ""
 
 virt-install \
+    --connect qemu:///system \
     --name "$VM_NAME" \
     --memory "$RAM" \
     --vcpus "$CPUS" \
