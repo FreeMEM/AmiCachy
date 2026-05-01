@@ -150,15 +150,43 @@ launch_fallback() {
     "
 }
 
+# Returns 0 if the .uae looks usable (non-empty, has at least one key=value).
+# A 0-byte or garbled .uae makes Amiberry segfault inside target_fixup_options
+# during cfgfile_load — and once that happens, every subsequent boot reloops.
+validate_uae_config() {
+    local f="$1"
+    [[ -s "$f" ]] || return 1
+    grep -qE '^[A-Za-z_][A-Za-z0-9_.]*[[:space:]]*=' "$f" 2>/dev/null
+}
+
+# Quarantine a broken .uae and unlink any boot reference pointing at it.
+quarantine_uae() {
+    local f="$1"
+    local q="${f}.broken-$(date +%s)"
+    mv -f "$f" "$q" 2>/dev/null || return 1
+    echo "Quarantined $f -> $q" >&2
+    if [[ -f "$BOOT_CONFIG" ]]; then
+        local ref
+        ref=$(<"$BOOT_CONFIG"); ref="${ref%$'\n'}"
+        [[ "$ref" == "$f" ]] && rm -f "$BOOT_CONFIG"
+    fi
+}
+
 # --- Run amiberry with crash protection (prevents autologin loop) ---
 run_amiberry() {
-    local config="$1"
+    local requested="$1"
     shift
-    local args=("$@" "$AMIBERRY_BIN")
+    local config="$requested"
 
-    # If the UAE config exists, load it and start emulation directly.
-    # use_gui=no skips the setup GUI; F12 still opens it during emulation.
-    # Without a config, open the GUI for manual setup.
+    # Pre-flight: a corrupt/empty .uae would segfault Amiberry on load and,
+    # because amilaunch is the autologin entry point, trap us in a crash loop.
+    if [[ -f "$config" ]] && ! validate_uae_config "$config"; then
+        echo "WARN: $config is empty or malformed." >&2
+        quarantine_uae "$config"
+        config="${UAE_DIR}/a1200.uae"
+    fi
+
+    local args=("$@" "$AMIBERRY_BIN")
     if [[ -f "$config" ]]; then
         args+=(--config "$config" -s use_gui=no)
     else
@@ -176,6 +204,12 @@ run_amiberry() {
     cage -- bash -c '"${@}" 2>&1 | tee '"$logfile"'; exit ${PIPESTATUS[0]}' _ "${args[@]}"
     local rc=$?
     if [[ $rc -ne 0 ]]; then
+        # Post-mortem: a crash mid-save can truncate the requested .uae to 0 bytes.
+        # Quarantine so the next boot doesn't reload the broken file and loop.
+        if [[ -f "$requested" ]] && ! validate_uae_config "$requested"; then
+            echo "WARN: $requested corrupted after crash." >&2
+            quarantine_uae "$requested"
+        fi
         launch_fallback "amiberry exited with code $rc (config: $config). Log: $logfile"
     fi
 }
