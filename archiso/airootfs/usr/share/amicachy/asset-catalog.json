@@ -17,7 +17,8 @@
       "format": "zip",
       "install": {
         "extract_to": "~/Amiberry/harddrives/AROS-Vision",
-        "auto_detect_hdf": true,
+        "layout": "filesystem-bundle",
+        "volume_name": "System",
         "uae_template": {
           "config_description": "AmiCachy — AROS Vision (UAE Edition)",
           "chipset": "aga",
@@ -35,8 +36,8 @@
           "cpu_24bit_addressing": false,
           "cpu_speed": "max",
           "cachesize": 16384,
-          "kickstart_rom_file": "/usr/share/amiberry/roms/aros-rom.bin",
-          "kickstart_ext_rom_file": "/usr/share/amiberry/roms/aros-ext.bin"
+          "kickstart_rom_file": "${FS_ROOT}/boot/amiga/aros-rom.bin",
+          "kickstart_ext_rom_file": "${FS_ROOT}/boot/amiga/aros-ext.bin"
         }
       }
     }
