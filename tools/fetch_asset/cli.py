@@ -215,6 +215,56 @@ def cmd_add_url(args) -> int:
     return 0
 
 
+def cmd_add_file(args) -> int:
+    """Manual install from a local file path (.zip or .hdf raw)."""
+    if not args.accept_responsibility:
+        print()
+        print("== Manual asset install ==")
+        print()
+        print(_wrap(
+            "AmiCachy does not validate or vouch for arbitrary files. "
+            "You confirm that you have the right to use this content under "
+            "whatever terms apply to it."
+        ))
+        print()
+        try:
+            answer = input(
+                "Do you accept full responsibility for this asset? [y/N] "
+            ).strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    progress = _CLIProgress()
+    print()
+    print(f"Installing from {args.path}…")
+    try:
+        asset = installer.install_from_file(
+            path=args.path,
+            name=args.name or "",
+            base_profile_id=args.profile,
+            progress_cb=progress,
+        )
+    except installer.InstallError as e:
+        print(f"\n\nERROR: {e}", file=sys.stderr)
+        return 1
+
+    print()
+    print()
+    print(f"Installed as '{asset.id}' ({asset.name}).")
+    rec = state.installed_record(asset.id)
+    if rec:
+        print(f"Location:  {rec['path']}")
+    from pathlib import Path as _P
+    uae = _P.home() / "Amiberry" / "conf" / f"amicachy-{asset.id}.uae"
+    if uae.is_file():
+        print(f"UAE conf:  {uae}")
+    print(f"sha256:    {asset.sha256}")
+    return 0
+
+
 def cmd_remove(args) -> int:
     catalog = cat_mod.load_catalog()
     a = cat_mod.get_asset(catalog, args.id)
@@ -290,6 +340,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rem.add_argument("id")
     p_rem.add_argument("-y", "--yes", action="store_true", help="No confirmation.")
 
+    p_file = sub.add_parser(
+        "add-file",
+        help="Install a custom .zip or .hdf from a local file path.",
+    )
+    p_file.add_argument("path", help="Local path (e.g. /run/media/amiga/USB/x.zip).")
+    p_file.add_argument(
+        "--name",
+        default="",
+        help="Display name (defaults to the filename without extension).",
+    )
+    p_file.add_argument(
+        "--profile",
+        default="a1200-aga",
+        choices=[pid for pid, _label, _tpl in presets.BASE_PROFILES],
+        help="Base UAE profile to seed the generated config.",
+    )
+    p_file.add_argument(
+        "--accept-responsibility",
+        action="store_true",
+        help="Skip the interactive responsibility prompt.",
+    )
+
     p_url = sub.add_parser(
         "add-url",
         help="Install a custom .zip from an arbitrary URL.",
@@ -335,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         "install": cmd_install,
         "remove": cmd_remove,
         "add-url": cmd_add_url,
+        "add-file": cmd_add_file,
         "gui": cmd_gui,
     }
     handler = handlers.get(args.cmd)

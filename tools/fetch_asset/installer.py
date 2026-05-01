@@ -419,3 +419,184 @@ def _hash_file(
             if progress_cb is not None:
                 progress_cb(STAGE_VERIFY, done, total)
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Manual install (Local file)
+# ---------------------------------------------------------------------------
+
+
+_HDF_MAGICS = (
+    b"RDSK",       # Rigid Disk Block — full disk images
+    b"DOS\x00",    # OFS
+    b"DOS\x01",    # FFS
+    b"DOS\x02",    # OFS-INTL
+    b"DOS\x03",    # FFS-INTL
+    b"DOS\x04",    # OFS-DC
+    b"DOS\x05",    # FFS-DC
+)
+
+
+def _looks_like_hdf(path: Path) -> bool:
+    """Best-effort sanity check on a presumed Amiga hardfile.
+
+    HDFs come in two shapes: full disk images that start with an RDSK at
+    sector 0, and partition-only images that start with the DH0 boot
+    block ('DOS\\xNN'). Anything else is suspicious.
+    """
+    try:
+        with open(path, "rb") as f:
+            header = f.read(8)
+    except OSError:
+        return False
+    return any(header.startswith(m) for m in _HDF_MAGICS)
+
+
+def _detect_local_format(path: Path) -> str:
+    """Return 'zip' or 'hdf' from filename. Anything else raises."""
+    suffix = path.suffix.lower()
+    if suffix == ".zip":
+        return "zip"
+    if suffix == ".hdf":
+        return "hdf"
+    raise InstallError(
+        f"Unsupported file extension '{suffix}'. "
+        f"Phase 2 supports only .zip and .hdf — .rom and .adf land in phase 3."
+    )
+
+
+def _copy_with_progress(
+    src: Path,
+    dst: Path,
+    progress_cb: Callable[[str, int, int], None] | None = None,
+) -> None:
+    """Stream-copy preserving progress events. Avoids loading the whole
+    file in memory (HDFs can be multi-GB)."""
+    total = src.stat().st_size
+    done = 0
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        while True:
+            chunk = fin.read(CHUNK)
+            if not chunk:
+                break
+            fout.write(chunk)
+            done += len(chunk)
+            if progress_cb is not None:
+                progress_cb(STAGE_EXTRACT, done, total)
+
+
+def install_from_file(
+    path: str | Path,
+    name: str,
+    base_profile_id: str,
+    progress_cb: Callable[[str, int, int], None] | None = None,
+) -> Asset:
+    """Manual install from a local file path (zip or hdf raw).
+
+    Mirrors install_from_url() but the source is on the filesystem
+    (typically a USB pendrive automounted under /run/media/$USER, or
+    a file in the user's home).
+
+    Caller MUST have collected the user's responsibility-acceptance
+    BEFORE calling this — no upstream license to display.
+    """
+    src = Path(path).expanduser().resolve()
+    if not src.is_file():
+        raise InstallError(f"File not found: {src}")
+
+    fmt = _detect_local_format(src)
+
+    if fmt == "hdf" and not _looks_like_hdf(src):
+        raise InstallError(
+            f"{src.name} doesn't look like an Amiga hardfile "
+            f"(no RDSK or DOS\\xNN magic at offset 0)."
+        )
+
+    display_name = name.strip() or src.stem
+    asset_id = f"manual-{_slugify(display_name)}"
+
+    template = presets.get_preset(base_profile_id)
+    extract_to = _expand(f"~/Amiberry/harddrives/{asset_id}")
+
+    asset = Asset(
+        id=asset_id,
+        name=display_name,
+        category="manual",
+        summary=f"Manually added by user from {src}",
+        homepage=f"file://{src}",
+        license_url="",
+        license_summary=(
+            "User-provided asset. AmiCachy does not host or vouch for its "
+            "contents. The user has accepted full responsibility for legality "
+            "and licensing."
+        ),
+        url=f"file://{src}",
+        sha256="",
+        size_bytes=src.stat().st_size,
+        format=fmt,
+        install={
+            "extract_to": str(extract_to),
+            "auto_detect_hdf": template is not None,
+            "uae_template": template or {},
+        },
+        version="",
+        source="user",
+    )
+
+    state.mark_accepted(asset.id)
+
+    extract_to.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "zip":
+        # Reuse the same safe-extract pipeline as the catalog flow.
+        # We hash from the source file, not a copy in cache, so a 4 GB
+        # HDF inside a zip doesn't get duplicated to disk.
+        asset.sha256 = _hash_file(src, progress_cb=progress_cb)
+        extract(src, extract_to, "zip", progress_cb=progress_cb)
+    else:  # fmt == "hdf"
+        # Raw HDF: copy into the asset dir so uninstall can rmtree
+        # cleanly without touching the user's source media.
+        dst = extract_to / src.name
+        _copy_with_progress(src, dst, progress_cb=progress_cb)
+        # Hash the destination — covers cases where the source was on
+        # a flaky USB and the copy diverged.
+        asset.sha256 = _hash_file(dst, progress_cb=progress_cb)
+
+    if progress_cb is not None:
+        progress_cb(STAGE_REGISTER, 0, 1)
+    register_uae(asset, extract_to)
+    if progress_cb is not None:
+        progress_cb(STAGE_REGISTER, 1, 1)
+
+    _catalog.save_user_asset(asset)
+    state.mark_installed(asset.id, str(extract_to), sha256=asset.sha256)
+
+    return asset
+
+
+def list_removable_mounts() -> list[Path]:
+    """Discover paths likely to be USB pendrives automounted by udisks2.
+
+    Returns a list of directory paths the user can browse for assets.
+    Order: most likely useful first. Empty if no candidates exist.
+    """
+    user = os.environ.get("USER") or "amiga"
+    candidates: list[Path] = []
+    for base in (Path("/run/media") / user, Path("/media") / user, Path("/run/media")):
+        if base.is_dir():
+            try:
+                for entry in sorted(base.iterdir()):
+                    if entry.is_dir():
+                        candidates.append(entry)
+            except OSError:
+                continue
+    # Deduplicate while preserving order.
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for p in candidates:
+        rp = p.resolve()
+        if rp in seen:
+            continue
+        seen.add(rp)
+        out.append(p)
+    return out

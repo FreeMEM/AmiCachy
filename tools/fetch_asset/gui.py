@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -220,6 +221,179 @@ class URLAssetDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Local file dialog
+# ---------------------------------------------------------------------------
+
+
+class FileAssetDialog(QDialog):
+    """Manual install from a local file (zip or hdf raw).
+
+    Discovers USB pendrives automounted by udisks2 under /run/media/$USER
+    and surfaces them as one-click shortcuts. Falls back to a regular
+    file picker for everything else.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add asset from local file")
+        self.resize(620, 520)
+
+        self._selected_path: Path | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("Add asset from local file")
+        f = QFont()
+        f.setPointSize(14)
+        f.setBold(True)
+        title.setFont(f)
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel(
+            "Pick a .zip bundle or a raw .hdf hardfile. Pendrives auto-mounted "
+            "by the system appear below; otherwise use 'Browse…'."
+        ))
+
+        # USB shortcuts list (collapsible-feeling — hidden if empty).
+        self._usb_label = QLabel("Detected removable media:")
+        self._usb_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        layout.addWidget(self._usb_label)
+
+        self._usb_list = QListWidget()
+        self._usb_list.setMaximumHeight(120)
+        self._usb_list.itemDoubleClicked.connect(self._on_usb_double_clicked)
+        layout.addWidget(self._usb_list)
+
+        actions = QHBoxLayout()
+        self._btn_rescan = QPushButton("Rescan USB")
+        self._btn_rescan.clicked.connect(self._scan_usb)
+        actions.addWidget(self._btn_rescan)
+        self._btn_browse = QPushButton("Browse…")
+        self._btn_browse.clicked.connect(self._browse)
+        actions.addWidget(self._btn_browse)
+        actions.addStretch()
+        layout.addLayout(actions)
+
+        self._path_label = QLabel("(no file selected)")
+        self._path_label.setStyleSheet(
+            "padding: 6px; background-color: #1a2a4a; "
+            "border: 1px solid #3b67a2; color: #cfd6ee;"
+        )
+        self._path_label.setWordWrap(True)
+        layout.addWidget(self._path_label)
+
+        # Asset info (name + base profile)
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self._name = QLineEdit()
+        self._name.setPlaceholderText("(optional — defaults to the filename)")
+        form.addRow("Name:", self._name)
+
+        self._profile = QComboBox()
+        for pid, label, _tpl in presets.BASE_PROFILES:
+            self._profile.addItem(label, pid)
+        form.addRow("Base profile:", self._profile)
+
+        layout.addLayout(form)
+
+        warning = QLabel(
+            "<i>AmiCachy does not validate or vouch for arbitrary files. "
+            "You confirm that you have the right to use this content under "
+            "whatever terms apply to it.</i>"
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #c0c8e0; font-size: 12px;")
+        layout.addWidget(warning)
+
+        self._accept_cb = QCheckBox("I understand and accept full responsibility.")
+        layout.addWidget(self._accept_cb)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Cancel)
+        self._ok = bb.addButton("Install", QDialogButtonBox.AcceptRole)
+        self._ok.setEnabled(False)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        layout.addWidget(bb)
+
+        self._accept_cb.toggled.connect(self._refresh_ok)
+
+        # Initial USB scan (silent — empty list just hides the section).
+        self._scan_usb()
+
+    # --- USB discovery -------------------------------------------------------
+
+    def _scan_usb(self) -> None:
+        from . import installer
+        mounts = installer.list_removable_mounts()
+
+        self._usb_list.clear()
+        if not mounts:
+            self._usb_label.setVisible(False)
+            self._usb_list.setVisible(False)
+            self._btn_rescan.setText("Detect USB")
+            return
+
+        self._usb_label.setVisible(True)
+        self._usb_list.setVisible(True)
+        self._btn_rescan.setText("Rescan USB")
+        for m in mounts:
+            item = QListWidgetItem(f"{m.name}    ({m})")
+            item.setData(Qt.UserRole, str(m))
+            self._usb_list.addItem(item)
+
+    def _on_usb_double_clicked(self, item: QListWidgetItem) -> None:
+        """Open a file dialog rooted at the chosen USB mount."""
+        root = item.data(Qt.UserRole)
+        self._open_browse_at(root)
+
+    def _browse(self) -> None:
+        # Default to home if no USB picked yet.
+        self._open_browse_at(str(Path.home()))
+
+    def _open_browse_at(self, root: str) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select asset file",
+            root,
+            "Asset files (*.zip *.hdf);;Zip archives (*.zip);;Hardfiles (*.hdf);;All files (*)",
+        )
+        if not path:
+            return
+        self._set_file(Path(path))
+
+    def _set_file(self, path: Path) -> None:
+        self._selected_path = path
+        size = ""
+        try:
+            size = f"  ({_fmt_size(path.stat().st_size)})"
+        except OSError:
+            pass
+        self._path_label.setText(f"{path}{size}")
+        self._refresh_ok()
+
+    # --- Validation ----------------------------------------------------------
+
+    def _refresh_ok(self) -> None:
+        self._ok.setEnabled(
+            self._selected_path is not None and self._accept_cb.isChecked()
+        )
+
+    # --- Result accessors ----------------------------------------------------
+
+    def file_path(self) -> str:
+        return str(self._selected_path) if self._selected_path else ""
+
+    def display_name(self) -> str:
+        return self._name.text().strip()
+
+    def base_profile_id(self) -> str:
+        return self._profile.currentData()
+
+
+# ---------------------------------------------------------------------------
 # Background install worker
 # ---------------------------------------------------------------------------
 
@@ -259,6 +433,15 @@ class InstallWorker(QThread):
                     name=p["name"],
                     base_profile_id=p["profile"],
                     expected_sha256=p.get("sha256", ""),
+                    progress_cb=cb,
+                )
+                path = Path(state.installed_record(asset.id)["path"])
+            elif self.kind == "file":
+                p = self.payload
+                asset = installer.install_from_file(
+                    path=p["path"],
+                    name=p["name"],
+                    base_profile_id=p["profile"],
                     progress_cb=cb,
                 )
                 path = Path(state.installed_record(asset.id)["path"])
@@ -419,15 +602,14 @@ class FetchAssetWindow(QWidget):
         self._bar.setMinimumWidth(280)
         fl.addWidget(self._bar, 1)
 
-        # Add menu (URL / local file). Local file lands in phase 2.
+        # Add menu (URL / local file).
         self._btn_add = QPushButton("Add asset…")
         self._add_menu = QMenu(self)
         a_url = QAction("From URL…", self)
         a_url.triggered.connect(self._on_add_from_url)
         self._add_menu.addAction(a_url)
         a_file = QAction("From local file…", self)
-        a_file.setEnabled(False)
-        a_file.setToolTip("Coming soon")
+        a_file.triggered.connect(self._on_add_from_file)
         self._add_menu.addAction(a_file)
         self._btn_add.setMenu(self._add_menu)
         fl.addWidget(self._btn_add)
@@ -514,6 +696,18 @@ class FetchAssetWindow(QWidget):
             "name": dlg.display_name(),
             "profile": dlg.base_profile_id(),
             "sha256": dlg.expected_sha256(),
+        }))
+
+    def _on_add_from_file(self):
+        if self._worker is not None:
+            return
+        dlg = FileAssetDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._start_worker(InstallWorker("file", {
+            "path": dlg.file_path(),
+            "name": dlg.display_name(),
+            "profile": dlg.base_profile_id(),
         }))
 
     def _start_worker(self, worker: "InstallWorker") -> None:
