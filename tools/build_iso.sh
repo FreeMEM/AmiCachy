@@ -122,7 +122,7 @@ setup_local_packages() {
     echo "   -> $(basename "$latest_pkg")"
 
     # Create repo database
-    repo-add "${LOCAL_REPO}/amicachy.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst
+    repo-add "${LOCAL_REPO}/amicachy-local.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst
 
     # Add local repo to pacman.conf
     cat >> "${PROFILE_DIR}/pacman.conf" << EOF
