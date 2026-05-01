@@ -7,6 +7,7 @@ the asset manager visually matches the Early Startup Control screen.
 from __future__ import annotations
 
 import html
+import subprocess
 import sys
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -147,6 +148,84 @@ class InstallWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# Exit dialog (Reboot / Power off / Cancel)
+# ---------------------------------------------------------------------------
+
+
+class ExitDialog(QDialog):
+    """Three-way exit dialog shown when the user presses 'Close'.
+
+    The Asset Manager runs as a fullscreen Cage app — there is no desktop
+    to fall back to. Instead of just closing (which would relaunch us via
+    the autologin loop), we ask the user what they want to do next:
+
+    - Reboot — go back to the systemd-boot menu and pick a different
+      profile (Classic 68k, Dev Station…). The standard 'I'm done with
+      the Asset Manager' action.
+    - Power off — actually end the session.
+    - Cancel — stay in the Asset Manager.
+    """
+
+    REBOOT = 1
+    POWEROFF = 2
+    CANCEL = 3
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Exit Asset Manager")
+        self.choice = self.CANCEL
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        title = QLabel("What would you like to do?")
+        f = QFont()
+        f.setPointSize(13)
+        f.setBold(True)
+        title.setFont(f)
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel(
+            "The Asset Manager has no desktop to return to.\n"
+            "Choose how to leave."
+        ))
+
+        btn_reboot = QPushButton("Reboot to boot menu")
+        btn_reboot.setObjectName("primaryButton")
+        btn_reboot.clicked.connect(lambda: self._pick(self.REBOOT))
+        layout.addWidget(btn_reboot)
+
+        btn_off = QPushButton("Power off")
+        btn_off.clicked.connect(lambda: self._pick(self.POWEROFF))
+        layout.addWidget(btn_off)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        layout.addWidget(btn_cancel)
+
+        self.setMinimumWidth(360)
+
+    def _pick(self, value: int) -> None:
+        self.choice = value
+        self.accept()
+
+
+def _system_action(action: str) -> None:
+    """Trigger reboot or poweroff via systemd-logind (no sudo needed when
+    the caller is in an active local seat — that's our case under cage)."""
+    cmd = ["systemctl", action]
+    try:
+        subprocess.Popen(cmd, start_new_session=True)
+    except OSError:
+        # Fallback for unusual setups; will silently no-op if neither path works.
+        try:
+            subprocess.Popen(["loginctl", action], start_new_session=True)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 
@@ -226,7 +305,7 @@ class FetchAssetWindow(QWidget):
         fl.addWidget(self._btn_remove)
 
         self._btn_close = QPushButton("Close")
-        self._btn_close.clicked.connect(self.close)
+        self._btn_close.clicked.connect(self._on_close_clicked)
         fl.addWidget(self._btn_close)
 
         root.addWidget(footer)
@@ -359,6 +438,46 @@ class FetchAssetWindow(QWidget):
         self._btn_remove.setEnabled(not busy)
         self._btn_close.setEnabled(not busy)
         self._list.setEnabled(not busy)
+
+    # --- Exit flow --------------------------------------------------------
+
+    def _on_close_clicked(self) -> None:
+        """Footer Close button. Always offers the reboot/poweroff dialog."""
+        self._prompt_exit()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        """Window-manager close (X button, Alt+F4) also goes through the
+        exit dialog. Outside cage (development on host), the user can
+        cancel and keep the window open; under cage there is no [X]."""
+        # If the user is mid-install, refuse and ask them to wait.
+        if self._worker is not None:
+            QMessageBox.warning(
+                self,
+                "Install in progress",
+                "An installation is running. Wait for it to finish before exiting."
+            )
+            event.ignore()
+            return
+
+        if self._prompt_exit():
+            event.accept()
+        else:
+            event.ignore()
+
+    def _prompt_exit(self) -> bool:
+        """Show the exit dialog. Returns True if the user picked an action
+        that effectively ends the session (reboot/poweroff), False if they
+        cancelled."""
+        dlg = ExitDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        if dlg.choice == ExitDialog.REBOOT:
+            _system_action("reboot")
+            return True
+        if dlg.choice == ExitDialog.POWEROFF:
+            _system_action("poweroff")
+            return True
+        return False
 
     def _refresh_list(self):
         # Re-render all rows so the "✓ installed" tag stays accurate.
