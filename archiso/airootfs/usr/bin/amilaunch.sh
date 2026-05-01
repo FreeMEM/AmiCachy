@@ -111,7 +111,7 @@ fi
 
 # --- Early Startup Control (hold F5 during boot) ---
 EARLY_STARTUP_UAE=""
-if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" ]]; then
+if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" && "$PROFILE" != "asset_manager" ]]; then
     if python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
         cage -- /usr/bin/amicachy-earlystartup 2>/dev/null
         if [[ $? -eq 0 && -f "$SESSION_CONFIG" ]]; then
@@ -251,9 +251,16 @@ case "$PROFILE" in
     dev_station)
         exec labwc -s /usr/bin/start_dev_env.sh
         ;;
+    asset_manager)
+        # Run the Asset Library GUI as a single fullscreen Cage app.
+        # Cage exits when the GUI closes; that drops back to the login,
+        # which auto-launches amilaunch again — so the user can pick another
+        # boot entry from systemd-boot at the next reboot.
+        exec cage -- /usr/bin/amicachy-fetch-asset gui
+        ;;
     *)
         echo "ERROR: Unknown profile '${PROFILE}'." >&2
-        echo "Valid profiles: installer, classic_68k, ppc_nitro, dev_station" >&2
+        echo "Valid profiles: installer, classic_68k, ppc_nitro, dev_station, asset_manager" >&2
         exit 1
         ;;
 esac

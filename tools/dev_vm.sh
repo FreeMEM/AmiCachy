@@ -127,7 +127,7 @@ sync_files() {
     #    Add serial console for dev logging (tty0 first to keep Plymouth on screen)
     echo ":: Syncing boot entries..."
     sudo mkdir -p "$MNT/boot/loader/entries"
-    for entry in "$PROJECT_DIR"/archiso/efiboot/loader/entries/0{1,2,3}-*.conf; do
+    for entry in "$PROJECT_DIR"/archiso/efiboot/loader/entries/0{1,2,3,4}-*.conf; do
         if [[ -f "$entry" ]]; then
             local dest="$MNT/boot/loader/entries/$(basename "$entry")"
             sudo cp "$entry" "$dest"
