@@ -24,7 +24,17 @@ BOOT_ENTRIES = {
         "title": "AmiCachy - Dev Station",
         "options": "root=LABEL=AMICACHY rw quiet splash loglevel=3 vt.global_cursor_default=0 amiprofile=dev_station",
     },
+    # Always installed: lets the user reach the Asset Library to add or
+    # update third-party bundles after first boot.
+    "asset_manager": {
+        "filename": "04-asset-manager.conf",
+        "title": "AmiCachy - Asset Manager",
+        "options": "root=LABEL=AMICACHY rw quiet splash loglevel=3 vt.global_cursor_default=0 amiprofile=asset_manager",
+    },
 }
+
+# Boot entries that must be written regardless of user selection.
+ALWAYS_INSTALL_ENTRIES = ("asset_manager",)
 
 LOADER_CONF_TEMPLATE = """\
 default {default_entry}

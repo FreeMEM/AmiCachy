@@ -372,11 +372,22 @@ def install_bootloader(
         LOADER_CONF_TEMPLATE.format(default_entry=default_entry),
     )
 
-    # Boot entries (only for selected profiles)
+    # Boot entries: user-selected profiles plus the always-installed ones
+    # (asset_manager). Order is preserved so the menu lists the user's
+    # picks first and 'Asset Manager' last.
     entries_dir = f"{mnt}/boot/loader/entries"
     Path(entries_dir).mkdir(parents=True, exist_ok=True)
 
-    for profile_id in selected_profiles:
+    from .resources import ALWAYS_INSTALL_ENTRIES
+    seen: set[str] = set()
+    to_write: list[str] = []
+    for pid in list(selected_profiles) + list(ALWAYS_INSTALL_ENTRIES):
+        if pid in seen or pid not in BOOT_ENTRIES:
+            continue
+        seen.add(pid)
+        to_write.append(pid)
+
+    for profile_id in to_write:
         entry = BOOT_ENTRIES[profile_id]
         content = (
             f"title   {entry['title']}\n"
@@ -385,6 +396,22 @@ def install_bootloader(
             f"options {entry['options']}\n"
         )
         _write_file(f"{entries_dir}/{entry['filename']}", content)
+
+
+def install_addon(runner: CommandRunner, asset_id: str) -> None:
+    """Run amicachy-fetch-asset inside the chroot, as user 'amiga'.
+
+    Using runuser keeps HOME, downloads, extraction and the generated .uae
+    inside /home/amiga (the live target user's home), exactly as if the
+    user had run the Asset Manager themselves after first boot.
+
+    --accept skips the interactive license prompt; the installer's own
+    Add-ons page already obtained explicit consent before reaching here.
+    """
+    runner.run_chroot([
+        "runuser", "-u", "amiga", "--",
+        "amicachy-fetch-asset", "--accept", "install", asset_id,
+    ])
 
 
 def final_cleanup(runner: CommandRunner) -> None:

@@ -15,6 +15,7 @@ from .backend import (
     emergency_cleanup,
     final_cleanup,
     generate_fstab,
+    install_addon,
     install_bootloader,
     mount_filesystems,
     partition_disk,
@@ -47,6 +48,9 @@ class InstallerState:
     # Profile selection
     selected_profiles: list[str] = field(default_factory=list)
     default_profile: str = "classic_68k"
+
+    # Optional asset bundles to fetch after the base install
+    selected_addons: list[str] = field(default_factory=list)
 
     # Computed during installation
     partitions: dict[str, str] = field(default_factory=dict)
@@ -230,9 +234,20 @@ class InstallWorker(QThread):
             self.state.selected_profiles,
             self.state.default_profile,
         )
-        self.step_changed.emit("Boot manager installed.", 92)
+        self.step_changed.emit("Boot manager installed.", 90)
 
-        # Step 8: Cleanup
+        # Step 8: Optional add-ons (asset bundles selected on the Add-ons page)
+        if self.state.selected_addons:
+            n = len(self.state.selected_addons)
+            for i, asset_id in enumerate(self.state.selected_addons, 1):
+                self.step_changed.emit(
+                    f"Downloading add-on {i}/{n}: {asset_id}…",
+                    90 + int(4 * i / n),
+                )
+                install_addon(runner, asset_id)
+            self.step_changed.emit("Add-ons installed.", 94)
+
+        # Step 9: Cleanup
         self.step_changed.emit("Finalizing...", 95)
         final_cleanup(runner)
         self.step_changed.emit("Installation complete!", 100)

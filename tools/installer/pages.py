@@ -545,7 +545,138 @@ class ProfileSelectPage(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# Page 4: Confirm
+# Page 4: Optional add-ons
+# ---------------------------------------------------------------------------
+
+
+class AddOnsPage(QWidget):
+    """Optional bundles (AROS Vision, etc.) fetched after the base install.
+
+    Each row is one asset from /usr/share/amicachy/asset-catalog.json and
+    has its own license-acceptance checkbox: a user cannot enable an
+    asset without ticking 'I accept the terms', mirroring the consent
+    flow of the standalone Asset Manager.
+    """
+
+    def __init__(self, state: InstallerState, parent=None):
+        super().__init__(parent)
+        self.state = state
+
+        # Two checkboxes per asset: 'install this' and 'accept license'.
+        # Install is gated on accept being ticked, so the user is forced
+        # to read the license summary before opting in.
+        self._select_cbs: dict[str, QCheckBox] = {}
+        self._accept_cbs: dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        layout.addWidget(_page_title("Optional Add-ons"))
+        layout.addWidget(_subtitle(
+            "These bundles are fetched from third-party servers after the base "
+            "install completes. They are entirely optional — you can also add "
+            "them later via the 'Asset Manager' boot entry."
+        ))
+
+        try:
+            from fetch_asset.catalog import load_catalog
+            self._catalog = load_catalog()
+        except Exception:
+            self._catalog = []
+
+        if not self._catalog:
+            note = QLabel("No add-ons available in the catalog.")
+            note.setStyleSheet("color: #aaa; font-style: italic;")
+            layout.addWidget(note)
+            layout.addStretch()
+            return
+
+        for asset in self._catalog:
+            layout.addWidget(self._build_row(asset))
+
+        layout.addStretch()
+
+    def _build_row(self, asset) -> QFrame:
+        frame = QFrame()
+        frame.setFrameShape(QFrame.StyledPanel)
+        frame.setStyleSheet(
+            "QFrame { background-color: #16213e; border-radius: 8px; "
+            "padding: 12px; margin: 4px 0; }"
+        )
+        outer = QVBoxLayout(frame)
+
+        top = QHBoxLayout()
+        select_cb = QCheckBox()
+        select_cb.setEnabled(False)  # gated until accept is ticked
+        select_cb.stateChanged.connect(
+            lambda _s, aid=asset.id: self._on_selection_changed(aid)
+        )
+        self._select_cbs[asset.id] = select_cb
+        top.addWidget(select_cb)
+
+        text = QVBoxLayout()
+        title = QLabel(f"<b>{asset.name}</b>")
+        title.setStyleSheet("font-size: 15px;")
+        text.addWidget(title)
+        meta = QLabel(f"{_fmt_size(asset.size_bytes)} · {asset.homepage}")
+        meta.setStyleSheet("color: #8d9bbb; font-size: 12px;")
+        meta.setOpenExternalLinks(True)
+        text.addWidget(meta)
+        text.addWidget(_info_label(asset.summary))
+        top.addLayout(text, stretch=1)
+        outer.addLayout(top)
+
+        # Compact license notice + acceptance checkbox.
+        notice = _info_label(asset.license_summary)
+        notice.setStyleSheet("color: #c0c8e0; font-size: 12px; margin-top: 6px;")
+        outer.addWidget(notice)
+
+        link = QLabel(
+            f"Full terms: <a href='{asset.license_url}'>{asset.license_url}</a>"
+        )
+        link.setOpenExternalLinks(True)
+        link.setStyleSheet("font-size: 12px;")
+        outer.addWidget(link)
+
+        accept_cb = QCheckBox(
+            f"I accept the terms above and want to install {asset.name}."
+        )
+        accept_cb.stateChanged.connect(
+            lambda _s, aid=asset.id: self._on_accept_changed(aid)
+        )
+        self._accept_cbs[asset.id] = accept_cb
+        outer.addWidget(accept_cb)
+
+        return frame
+
+    def _on_accept_changed(self, asset_id: str) -> None:
+        accepted = self._accept_cbs[asset_id].isChecked()
+        select = self._select_cbs[asset_id]
+        select.setEnabled(accepted)
+        if not accepted:
+            select.setChecked(False)
+        self._sync_state()
+
+    def _on_selection_changed(self, _asset_id: str) -> None:
+        self._sync_state()
+
+    def _sync_state(self) -> None:
+        self.state.selected_addons = [
+            aid for aid, cb in self._select_cbs.items() if cb.isChecked()
+        ]
+
+
+def _fmt_size(n: int) -> str:
+    f = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if f < 1024 or unit == "TB":
+            return f"{f:.1f} {unit}"
+        f /= 1024
+    return f"{f:.1f} TB"
+
+
+# ---------------------------------------------------------------------------
+# Page 5: Confirm
 # ---------------------------------------------------------------------------
 
 
@@ -587,6 +718,13 @@ class ConfirmPage(QWidget):
             default = " (default)" if pid == s.default_profile else ""
             profiles_text += f"  \u2022 {name}{default}\n"
 
+        addons_text = ""
+        if s.selected_addons:
+            for aid in s.selected_addons:
+                addons_text += f"  \u2022 {aid}\n"
+        else:
+            addons_text = "  \u2022 (none)\n"
+
         size_gb = s.target_device_size / (1024 ** 3) if s.target_device_size else 0
 
         text = (
@@ -597,6 +735,7 @@ class ConfirmPage(QWidget):
             f"  \u2022 System: ~60% of disk (ext4, label: AMICACHY)\n"
             f"  \u2022 Amiga Data: ~40% of disk (ext4)\n\n"
             f"<b>Boot modes:</b>\n{profiles_text}\n"
+            f"<b>Add-ons:</b>\n{addons_text}\n"
             f"<b>Hardware:</b> {cpu_model} ({arch})"
         )
         self._summary.setText(text)
@@ -812,6 +951,7 @@ class InstallerWizard(QWidget):
         self._audit = HardwareAuditPage(self.state)
         self._disk = DiskSelectPage(self.state)
         self._profiles = ProfileSelectPage(self.state)
+        self._addons = AddOnsPage(self.state)
         self._confirm = ConfirmPage(self.state)
         self._install = InstallPage(self.state)
         self._finish = FinishPage()
@@ -822,6 +962,7 @@ class InstallerWizard(QWidget):
             self._audit,
             self._disk,
             self._profiles,
+            self._addons,
             self._confirm,
             self._install,
             self._finish,
@@ -848,9 +989,25 @@ class InstallerWizard(QWidget):
         self._update_ui()
 
     # -- Navigation --
+    #
+    # Page index map (must stay in sync with _pages above):
+    #   0 Welcome
+    #   1 HardwareAudit
+    #   2 DiskSelect
+    #   3 ProfileSelect
+    #   4 AddOns
+    #   5 Confirm
+    #   6 Install
+    #   7 Finish
+    #   8 Error
+
+    _IDX_CONFIRM = 5
+    _IDX_INSTALL = 6
+    _IDX_FINISH = 7
+    _IDX_ERROR = 8
 
     def _go_next(self) -> None:
-        if self._current < 6:
+        if self._current < self._IDX_INSTALL:
             self._current += 1
             self._stack.setCurrentIndex(self._current)
             self._on_page_entered(self._current)
@@ -873,6 +1030,9 @@ class InstallerWizard(QWidget):
         elif isinstance(page, ProfileSelectPage):
             page.update_from_audit()
             self._footer.set_next_enabled(page.has_selection)
+        elif isinstance(page, AddOnsPage):
+            # Add-ons are entirely optional; Next is always enabled.
+            self._footer.set_next_enabled(True)
         elif isinstance(page, ConfirmPage):
             page.refresh_summary()
         elif isinstance(page, InstallPage):
@@ -885,25 +1045,27 @@ class InstallerWizard(QWidget):
             "Hardware Check",
             "Select Drive",
             "Select Modes",
+            "Add-ons",
             "Confirm",
             "Installing",
             "Complete",
             "Error",
         ]
         self._header.set_title(titles[self._current])
-        self._header.set_progress(self._current, 7)
+        # Progress shown only for the user-driven pages (0..Confirm),
+        # not for Install/Finish/Error.
+        self._header.set_progress(self._current, self._IDX_CONFIRM + 1)
 
-        # Back button: visible on pages 1-4
-        self._footer.set_back_visible(0 < self._current < 5)
+        # Back button: visible on the user-driven pages 1..Confirm
+        self._footer.set_back_visible(0 < self._current <= self._IDX_CONFIRM)
 
-        # Next button text
-        if self._current == 4:
+        # Confirm page is the launching point
+        if self._current == self._IDX_CONFIRM:
             self._footer.set_next_text("Begin Installation")
         else:
             self._footer.set_next_text("Next")
 
-        # Next visibility
-        self._footer.set_next_visible(self._current < 5)
+        self._footer.set_next_visible(self._current <= self._IDX_CONFIRM)
 
     # -- Signal handlers --
 
@@ -922,12 +1084,12 @@ class InstallerWizard(QWidget):
 
     def _on_install_finished(self, success: bool, error: str) -> None:
         if success:
-            self._current = 6  # FinishPage
-            self._stack.setCurrentIndex(6)
+            self._current = self._IDX_FINISH
+            self._stack.setCurrentIndex(self._IDX_FINISH)
             self._footer.set_navigation_visible(False)
             self._update_ui()
         else:
-            self._stack.setCurrentIndex(7)  # ErrorPage
+            self._stack.setCurrentIndex(self._IDX_ERROR)
             self._error.set_error(error)
             self._footer.set_navigation_visible(False)
 
