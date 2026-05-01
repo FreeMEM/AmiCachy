@@ -8,7 +8,7 @@ import textwrap
 import time
 
 from . import catalog as cat_mod
-from . import installer, state
+from . import installer, presets, state
 
 
 def _fmt_size(n: int) -> str:
@@ -158,6 +158,63 @@ def cmd_install(args) -> int:
     return 0
 
 
+def cmd_add_url(args) -> int:
+    """Manual install from a URL pasted at the command line.
+
+    Always requires the user to acknowledge responsibility for the
+    asset's licensing — either interactively or via --accept-responsibility.
+    """
+    if not args.accept_responsibility:
+        print()
+        print("== Manual asset install ==")
+        print()
+        print(_wrap(
+            "AmiCachy does not host, validate or vouch for arbitrary URLs. "
+            "You confirm that you have the right to download and use this "
+            "content under whatever terms apply to it."
+        ))
+        print()
+        try:
+            answer = input(
+                "Do you accept full responsibility for this asset? [y/N] "
+            ).strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    progress = _CLIProgress()
+    print()
+    print(f"Installing from {args.url}…")
+    try:
+        asset = installer.install_from_url(
+            url=args.url,
+            name=args.name or "",
+            base_profile_id=args.profile,
+            expected_sha256=args.sha256 or "",
+            progress_cb=progress,
+        )
+    except installer.InstallError as e:
+        print(f"\n\nERROR: {e}", file=sys.stderr)
+        return 1
+
+    print()
+    print()
+    print(f"Installed as '{asset.id}' ({asset.name}).")
+    rec = state.installed_record(asset.id)
+    if rec:
+        print(f"Location:  {rec['path']}")
+    uae = (
+        __import__("pathlib").Path.home() / "Amiberry" / "conf"
+        / f"amicachy-{asset.id}.uae"
+    )
+    if uae.is_file():
+        print(f"UAE conf:  {uae}")
+    print(f"sha256:    {asset.sha256}")
+    return 0
+
+
 def cmd_remove(args) -> int:
     catalog = cat_mod.load_catalog()
     a = cat_mod.get_asset(catalog, args.id)
@@ -233,6 +290,33 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rem.add_argument("id")
     p_rem.add_argument("-y", "--yes", action="store_true", help="No confirmation.")
 
+    p_url = sub.add_parser(
+        "add-url",
+        help="Install a custom .zip from an arbitrary URL.",
+    )
+    p_url.add_argument("url", help="https:// URL of the .zip archive.")
+    p_url.add_argument(
+        "--name",
+        default="",
+        help="Display name (defaults to the URL filename).",
+    )
+    p_url.add_argument(
+        "--profile",
+        default="a1200-aga",
+        choices=[pid for pid, _label, _tpl in presets.BASE_PROFILES],
+        help="Base UAE profile to seed the generated config.",
+    )
+    p_url.add_argument(
+        "--sha256",
+        default="",
+        help="Optional sha256 to verify the download against.",
+    )
+    p_url.add_argument(
+        "--accept-responsibility",
+        action="store_true",
+        help="Skip the interactive responsibility prompt.",
+    )
+
     sub.add_parser("gui", help="Launch the Qt frontend.")
 
     return p
@@ -250,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         "show": cmd_show,
         "install": cmd_install,
         "remove": cmd_remove,
+        "add-url": cmd_add_url,
         "gui": cmd_gui,
     }
     handler = handlers.get(args.cmd)

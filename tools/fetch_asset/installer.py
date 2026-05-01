@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable
 
-from . import state
+from . import catalog as _catalog
+from . import presets, state
 from .catalog import Asset
 
 
@@ -274,3 +277,145 @@ def uninstall_asset(asset_id: str) -> None:
     uae = Path.home() / "Amiberry" / "conf" / f"amicachy-{asset_id}.uae"
     uae.unlink(missing_ok=True)
     state.mark_uninstalled(asset_id)
+    # Drop user-catalog entry too — for catalog assets this is a no-op,
+    # for manually-added ones it makes them disappear from the GUI list.
+    _catalog.remove_user_asset(asset_id)
+
+
+# ---------------------------------------------------------------------------
+# Manual install (Custom URL)
+# ---------------------------------------------------------------------------
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(text: str, fallback: str = "asset") -> str:
+    """Make a stable, filesystem-safe id from arbitrary user input."""
+    s = _SLUG_RE.sub("-", (text or "").strip().lower()).strip("-")
+    return (s or fallback)[:48]
+
+
+def _filename_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    return Path(parsed.path).name or "download"
+
+
+def install_from_url(
+    url: str,
+    name: str,
+    base_profile_id: str,
+    expected_sha256: str = "",
+    progress_cb: Callable[[str, int, int], None] | None = None,
+    keep_archive: bool = False,
+) -> Asset:
+    """Manual install from an arbitrary URL.
+
+    Builds an Asset on the fly, runs the standard pipeline, persists the
+    Asset to the user catalog so it shows up in the GUI list afterwards.
+
+    The caller MUST have collected the user's responsibility-acceptance
+    BEFORE calling this — there's no upstream license to display.
+
+    `expected_sha256` is optional. If provided, the archive is verified
+    against it. If omitted, the sha256 is computed and stored in the
+    user catalog so subsequent reinstalls can detect upstream changes.
+
+    Currently supports format=zip only. Local files / .hdf raw / .rom
+    will be added in the next phases.
+    """
+    if not url:
+        raise InstallError("URL is required.")
+    if not url.lower().startswith(("http://", "https://")):
+        raise InstallError("URL must use http:// or https://")
+
+    fname = _filename_from_url(url)
+    if not fname.lower().endswith(".zip"):
+        raise InstallError(
+            "Only .zip archives are supported for URL installs in this version. "
+            "Local file support (.hdf, .rom) is coming next."
+        )
+
+    display_name = name.strip() or fname
+    asset_id = f"manual-{_slugify(name or fname)}"
+
+    template = presets.get_preset(base_profile_id)
+    install_spec = {
+        "extract_to": f"~/Amiberry/harddrives/{asset_id}",
+        "auto_detect_hdf": template is not None,
+        "uae_template": template or {},
+    }
+
+    asset = Asset(
+        id=asset_id,
+        name=display_name,
+        category="manual",
+        summary=f"Manually added by user from {url}",
+        homepage=url,
+        license_url="",
+        license_summary=(
+            "User-provided asset. AmiCachy does not host or vouch for its "
+            "contents. The user has accepted full responsibility for legality "
+            "and licensing."
+        ),
+        url=url,
+        sha256=expected_sha256,
+        size_bytes=0,
+        format="zip",
+        install=install_spec,
+        version="",
+        source="user",
+    )
+
+    # The caller already obtained consent; record it explicitly so the
+    # rest of install_asset's contract (mark_accepted is required) is met.
+    state.mark_accepted(asset.id)
+
+    archive = _cache_dir() / f"{asset.id}.{asset.format}"
+    download(asset.url, archive, progress_cb=progress_cb)
+
+    actual = _hash_file(archive, progress_cb=progress_cb)
+    if expected_sha256 and actual.lower() != expected_sha256.lower():
+        archive.unlink(missing_ok=True)
+        raise InstallError(
+            f"sha256 mismatch — expected {expected_sha256}, got {actual}"
+        )
+    asset.sha256 = actual
+    asset.size_bytes = archive.stat().st_size
+
+    extract_to = _expand(asset.install["extract_to"])
+    extract(archive, extract_to, asset.format, progress_cb=progress_cb)
+
+    if progress_cb is not None:
+        progress_cb(STAGE_REGISTER, 0, 1)
+    register_uae(asset, extract_to)
+    if progress_cb is not None:
+        progress_cb(STAGE_REGISTER, 1, 1)
+
+    _catalog.save_user_asset(asset)
+    state.mark_installed(asset.id, str(extract_to), sha256=asset.sha256)
+
+    if not keep_archive:
+        archive.unlink(missing_ok=True)
+
+    return asset
+
+
+def _hash_file(
+    path: Path,
+    progress_cb: Callable[[str, int, int], None] | None = None,
+) -> str:
+    """Compute sha256 of `path`, emitting verify-stage progress events."""
+    h = hashlib.sha256()
+    total = path.stat().st_size
+    done = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+            done += len(chunk)
+            if progress_cb is not None:
+                progress_cb(STAGE_VERIFY, done, total)
+    return h.hexdigest()

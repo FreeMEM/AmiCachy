@@ -9,18 +9,23 @@ from __future__ import annotations
 import html
 import subprocess
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -31,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import catalog as cat_mod
-from . import installer, state
+from . import installer, presets, state
 
 try:
     # earlystartup/ and fetch_asset/ live side by side under
@@ -116,6 +121,105 @@ class LicenseDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Custom URL dialog
+# ---------------------------------------------------------------------------
+
+
+class URLAssetDialog(QDialog):
+    """Manual install: user pastes a URL and chooses a base profile.
+
+    No upstream license to display, so the user must explicitly accept
+    full responsibility for the asset's legality (per project policy:
+    'always checkbox' for manual sources).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add asset from URL")
+        self.resize(560, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("Add asset from URL")
+        f = QFont()
+        f.setPointSize(14)
+        f.setBold(True)
+        title.setFont(f)
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel(
+            "Paste the direct URL of a .zip archive containing your bundle "
+            "(typically an .hdf file inside)."
+        ))
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self._url = QLineEdit()
+        self._url.setPlaceholderText("https://example.com/path/to/bundle.zip")
+        form.addRow("URL:", self._url)
+
+        self._name = QLineEdit()
+        self._name.setPlaceholderText("(optional — defaults to the filename)")
+        form.addRow("Name:", self._name)
+
+        self._sha = QLineEdit()
+        self._sha.setPlaceholderText("(optional — leave empty to compute on the fly)")
+        form.addRow("Expected sha256:", self._sha)
+
+        self._profile = QComboBox()
+        for pid, label, _tpl in presets.BASE_PROFILES:
+            self._profile.addItem(label, pid)
+        form.addRow("Base profile:", self._profile)
+
+        layout.addLayout(form)
+
+        warning = QLabel(
+            "<i>AmiCachy does not host, validate or vouch for arbitrary URLs. "
+            "You confirm that you have the right to download and use this "
+            "content under whatever terms apply to it.</i>"
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #c0c8e0; font-size: 12px;")
+        layout.addWidget(warning)
+
+        self._accept_cb = QCheckBox("I understand and accept full responsibility.")
+        layout.addWidget(self._accept_cb)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Cancel)
+        self._ok = bb.addButton("Install", QDialogButtonBox.AcceptRole)
+        self._ok.setEnabled(False)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        layout.addWidget(bb)
+
+        # Enable Install only when URL has content AND the accept box is ticked.
+        self._url.textChanged.connect(self._refresh_ok)
+        self._accept_cb.toggled.connect(self._refresh_ok)
+
+    def _refresh_ok(self) -> None:
+        self._ok.setEnabled(
+            bool(self._url.text().strip()) and self._accept_cb.isChecked()
+        )
+
+    # --- Result accessors -----------------------------------------------------
+
+    def url(self) -> str:
+        return self._url.text().strip()
+
+    def display_name(self) -> str:
+        return self._name.text().strip()
+
+    def expected_sha256(self) -> str:
+        return self._sha.text().strip()
+
+    def base_profile_id(self) -> str:
+        return self._profile.currentData()
+
+
+# ---------------------------------------------------------------------------
 # Background install worker
 # ---------------------------------------------------------------------------
 
@@ -125,21 +229,41 @@ class InstallWorker(QThread):
 
     Emits progress(stage, current, total). Marshalling via Qt signals
     keeps QProgressBar updates safe.
+
+    Two modes:
+    - kind="catalog": runs install_asset(asset). Use this for entries
+      that already exist in the catalog (with sha256, license, etc.).
+    - kind="url": runs install_from_url(url, name, profile, sha256).
+      Use this for manually-added URLs.
     """
 
     progress = Signal(str, int, int)
     finished_ok = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, asset):
+    def __init__(self, kind: str, payload: dict):
         super().__init__()
-        self.asset = asset
+        self.kind = kind
+        self.payload = payload
 
     def run(self):
         def cb(stage, current, total):
             self.progress.emit(stage, current, total)
         try:
-            path = installer.install_asset(self.asset, progress_cb=cb)
+            if self.kind == "catalog":
+                path = installer.install_asset(self.payload["asset"], progress_cb=cb)
+            elif self.kind == "url":
+                p = self.payload
+                asset = installer.install_from_url(
+                    url=p["url"],
+                    name=p["name"],
+                    base_profile_id=p["profile"],
+                    expected_sha256=p.get("sha256", ""),
+                    progress_cb=cb,
+                )
+                path = Path(state.installed_record(asset.id)["path"])
+            else:
+                raise installer.InstallError(f"unknown worker kind: {self.kind}")
             self.finished_ok.emit(str(path))
         except installer.InstallError as e:
             self.failed.emit(str(e))
@@ -295,6 +419,19 @@ class FetchAssetWindow(QWidget):
         self._bar.setMinimumWidth(280)
         fl.addWidget(self._bar, 1)
 
+        # Add menu (URL / local file). Local file lands in phase 2.
+        self._btn_add = QPushButton("Add asset…")
+        self._add_menu = QMenu(self)
+        a_url = QAction("From URL…", self)
+        a_url.triggered.connect(self._on_add_from_url)
+        self._add_menu.addAction(a_url)
+        a_file = QAction("From local file…", self)
+        a_file.setEnabled(False)
+        a_file.setToolTip("Coming soon")
+        self._add_menu.addAction(a_file)
+        self._btn_add.setMenu(self._add_menu)
+        fl.addWidget(self._btn_add)
+
         self._btn_install = QPushButton("Install")
         self._btn_install.setObjectName("primaryButton")
         self._btn_install.clicked.connect(self._on_install)
@@ -364,13 +501,31 @@ class FetchAssetWindow(QWidget):
                 return
             state.mark_accepted(a.id)
 
+        self._start_worker(InstallWorker("catalog", {"asset": a}))
+
+    def _on_add_from_url(self):
+        if self._worker is not None:
+            return
+        dlg = URLAssetDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._start_worker(InstallWorker("url", {
+            "url": dlg.url(),
+            "name": dlg.display_name(),
+            "profile": dlg.base_profile_id(),
+            "sha256": dlg.expected_sha256(),
+        }))
+
+    def _start_worker(self, worker: "InstallWorker") -> None:
+        """Common path to launch any kind of install. Wires up signals,
+        toggles UI state, makes sure we don't run two at the same time."""
         self._bar.setVisible(True)
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._set_busy(True)
         self._status.setText("Starting…")
 
-        self._worker = InstallWorker(a)
+        self._worker = worker
         self._worker.progress.connect(self._on_progress)
         self._worker.finished_ok.connect(self._on_done)
         self._worker.failed.connect(self._on_fail)
@@ -437,6 +592,7 @@ class FetchAssetWindow(QWidget):
         self._btn_install.setEnabled(not busy)
         self._btn_remove.setEnabled(not busy)
         self._btn_close.setEnabled(not busy)
+        self._btn_add.setEnabled(not busy)
         self._list.setEnabled(not busy)
 
     # --- Exit flow --------------------------------------------------------
@@ -480,15 +636,25 @@ class FetchAssetWindow(QWidget):
         return False
 
     def _refresh_list(self):
-        # Re-render all rows so the "✓ installed" tag stays accurate.
+        """Reload catalog (system + user) and rebuild the list rows.
+
+        Reloading is necessary because adding an asset via URL persists
+        a new entry in the user catalog that the original snapshot
+        captured at __init__ time does not know about.
+        """
+        self._catalog = cat_mod.load_catalog()
+
         current_id = None
         if self._list.currentItem():
             current_id = self._list.currentItem().data(Qt.UserRole)
+
         self._list.blockSignals(True)
         self._list.clear()
         for a in self._catalog:
             tag = " ✓" if state.is_installed(a.id) else ""
-            item = QListWidgetItem(f"{a.name}{tag}\n  {_fmt_size(a.size_bytes)}")
+            badge = " [user]" if a.source == "user" else ""
+            label = f"{a.name}{badge}{tag}\n  {_fmt_size(a.size_bytes)}"
+            item = QListWidgetItem(label)
             item.setData(Qt.UserRole, a.id)
             self._list.addItem(item)
             if a.id == current_id:
