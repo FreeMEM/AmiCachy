@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "_comment": "Catalog of optional third-party assets that AmiCachy can fetch on demand. See tools/fetch_asset/. Each asset is downloaded directly from its origin server; AmiCachy does not mirror or redistribute the binaries.",
+  "assets": [
+    {
+      "id": "aros-vision-uae",
+      "name": "AROS Vision (UAE Edition)",
+      "category": "amiga-system",
+      "version": "2022-04",
+      "summary": "Pre-configured AROS 68k Workbench environment by Olaf 'Olsen' Schoenweiss. Bundles AROS ROM replacements (no proprietary Kickstart needed), an enriched Workbench setup, MUI, common applications and a curated WHDLoad library. The UAE Edition is the variant intended for emulators and is the legally cleanest one — it does not require a proprietary Kickstart 3.1 ROM.",
+      "homepage": "https://www.aros-vision.de/",
+      "license_url": "https://www.aros-vision.de/download.html",
+      "license_summary": "AROS core is licensed under the AROS Public License (APL). The bundle includes third-party software (MUI, WHDLoad slaves, applications) under their respective freeware/shareware terms — see the homepage for full conditions. AmiCachy does not redistribute the archive: it is fetched directly from the author's server with your explicit consent.",
+      "url": "https://www.aros-vision.de/downloads/AROS_2022_Basis_UAE.zip",
+      "sha256": "d7e56b658d8345a82e2f4a8370f5a6604bcddc7c6cecc487434cd35361c667c8",
+      "size_bytes": 3584394866,
+      "format": "zip",
+      "install": {
+        "extract_to": "~/Amiberry/harddrives/AROS-Vision",
+        "auto_detect_hdf": true,
+        "uae_template": {
+          "config_description": "AmiCachy — AROS Vision (UAE Edition)",
+          "chipset": "aga",
+          "chipmem_size": 8,
+          "fastmem_size": 0,
+          "z3mem_size": 256,
+          "z3mem_start": "0x10000000",
+          "bogomem_size": 0,
+          "gfxcard_type": "ZorroIII",
+          "gfxcard_size": 64,
+          "cpu_type": "68040",
+          "cpu_model": "68060",
+          "fpu_model": "68060",
+          "cpu_compatible": false,
+          "cpu_24bit_addressing": false,
+          "cpu_speed": "max",
+          "cachesize": 16384,
+          "kickstart_rom_file": "/usr/share/amiberry/roms/aros-rom.bin",
+          "kickstart_ext_rom_file": "/usr/share/amiberry/roms/aros-ext.bin"
+        }
+      }
+    }
+  ]
+}

@@ -158,10 +158,17 @@ sync_files() {
     sudo rsync -a "$PROJECT_DIR/tools/earlystartup/" \
         "$MNT/usr/share/amicachy/tools/earlystartup/"
 
+    # 3c. Asset Library tools (fetch_asset)
+    echo ":: Syncing fetch_asset tools..."
+    sudo mkdir -p "$MNT/usr/share/amicachy/tools/fetch_asset"
+    sudo rsync -a "$PROJECT_DIR/tools/fetch_asset/" \
+        "$MNT/usr/share/amicachy/tools/fetch_asset/"
+
     # 4. Fix permissions for executable scripts
     sudo chmod 755 "$MNT/usr/bin/amilaunch.sh" \
                     "$MNT/usr/bin/amicachy-installer" \
                     "$MNT/usr/bin/amicachy-earlystartup" \
+                    "$MNT/usr/bin/amicachy-fetch-asset" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
 
     # 5. Fix ownership: rsync -a preserves host uid which maps to amiga (1000)
