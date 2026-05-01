@@ -274,11 +274,16 @@ def render_uae_template_fs(
     extract_root: Path,
     volume_name: str = "System",
 ) -> str:
-    """Generate a .uae anchoring DH0 to a directory mount (filesystem2=).
+    """Generate a .uae anchoring DH0 to a directory mount.
 
     Used by bundles distributed as a deployed Amiga filesystem (Workbench
     laid out on disk) instead of a hardfile image. AROS Vision is the
     poster child for this mode.
+
+    We emit only `uaehf0=dir,…` and deliberately skip the legacy
+    `filesystem2=…` line: when both are present some AROS bundles see
+    two separate DH0 volumes and boot Workbench twice (the screen ends
+    up duplicated side-by-side). uaehf0 alone is enough for Amiberry.
     """
     ctx = {
         "EXTRACT_ROOT": str(extract_root),
@@ -287,7 +292,6 @@ def render_uae_template_fs(
     }
     lines = _render_template_lines(template, ctx)
     spec = f"rw,DH0:{volume_name}:{fs_root},0"
-    lines.append(f"filesystem2={spec}")
     lines.append(f"uaehf0=dir,{spec}")
     lines.extend(_UAE_BOILERPLATE)
     return "\n".join(lines) + "\n"
