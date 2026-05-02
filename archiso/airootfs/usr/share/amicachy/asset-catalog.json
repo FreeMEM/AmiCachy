@@ -68,21 +68,7 @@
           "kickstart_rom_file": "${FS_ROOT}/boot/amiga/aros-rom.bin",
           "kickstart_ext_rom_file": "${FS_ROOT}/boot/amiga/aros-ext.bin"
         },
-        "_fsuae_comment": "Companion FS-UAE profile used when the user wants the bundle's native Picasso96 RTG. Slower than the Amiberry+AGA path (dir-mount syscalls go through fs-uae's filesystem driver) but renders without the horizontal-tiling bug. Boot can take 5-8 minutes the first time; treat as 'experimental' until this gets backed by an HDF.",
-        "fsuae_template": {
-          "amiga_model": "A1200",
-          "chip_memory": 8192,
-          "slow_memory": 0,
-          "zorro_iii_memory": 262144,
-          "graphics_card": "uaegfx-z3",
-          "graphics_memory": 131072,
-          "cpu": "68020",
-          "fpu": "68882",
-          "cpu_speed": "max",
-          "jit_compiler": 1,
-          "kickstart_file": "${FS_ROOT}/boot/amiga/aros-rom.bin",
-          "kickstart_ext_file": "${FS_ROOT}/boot/amiga/aros-ext.bin"
-        }
+        "_fsuae_attempt_outcome": "We tried adding a fsuae_template here so the same install would also produce an .fs-uae profile with native Picasso96 RTG. End result: dir-mount + RTG re-triggers the horizontal-tiling display bug; HDF + RTG renders fine but the only Linux tool that can write a bootable Amiga FS image (xdftool from amitools) only supports DOS0..7 — DOS3 is the highest AROS m68k can boot from ROM and it caps filenames at 30 chars. AROS Vision has 3700+ files and 60+ critical libraries with longer names, so packing them into DOS3 strips out enough of the bundle that DOpus5 / Scalos / utilities crash on missing libs. Reviving this would need PFS3-write tooling (which doesn't exist for Linux at this time) or repackaging the bundle from scratch with shortened paths. Until then AROS Vision ships only as the AGA-on-Amiberry profile above."
       }
     }
   ]
