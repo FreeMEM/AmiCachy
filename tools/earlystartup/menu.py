@@ -420,7 +420,10 @@ class EarlyStartupMenu(QWidget):
             config.write_session_ref(preset)
         else:
             rom, hdfs, chipmem, fastmem = self._gather_settings()
-            config.write_session_uae(rom, hdfs, chipmem, fastmem)
+            if self._radio_fsuae.isChecked():
+                config.write_session_fsuae(rom, hdfs, chipmem, fastmem)
+            else:
+                config.write_session_uae(rom, hdfs, chipmem, fastmem)
         sys.exit(0)
 
     def _on_save(self) -> None:
@@ -431,7 +434,10 @@ class EarlyStartupMenu(QWidget):
             err = config.write_boot_ref(preset)
         else:
             rom, hdfs, chipmem, fastmem = self._gather_settings()
-            err = config.write_saved_uae(rom, hdfs, chipmem, fastmem)
+            if self._radio_fsuae.isChecked():
+                err = config.write_saved_fsuae(rom, hdfs, chipmem, fastmem)
+            else:
+                err = config.write_saved_uae(rom, hdfs, chipmem, fastmem)
         if err:
             print(f"Warning: persistent save failed: {err}", file=sys.stderr)
         sys.exit(0)

@@ -348,3 +348,80 @@ def write_saved_uae(
         return write_boot_ref(SAVED_UAE)
     except OSError as exc:
         return str(exc)
+
+
+# ---------------------------------------------------------------------------
+# FS-UAE Custom mode (mirrors the Amiberry path above)
+# ---------------------------------------------------------------------------
+
+SESSION_FSUAE = "/tmp/amicachy-session.fs-uae"
+SAVED_FSUAE = "/home/amiga/Amiberry/conf/amicachy-default.fs-uae"
+
+
+def _render_fsuae_custom(
+    rom: RomEntry,
+    hdfs: list[str],
+    chipmem: int,
+    fastmem: int,
+    config_description: str | None = None,
+) -> str:
+    """Render a .fs-uae from the Custom-mode UI values.
+
+    The UI hands us values in Amiberry units (chipmem 1=512 KB, 2=1 MB,
+    4=2 MB; fastmem in MB). FS-UAE wants chip_memory and fast_memory in
+    KB. The conversion is intentional and explicit — these aren't the
+    same key with a renamed unit, the emulators model RAM separately.
+    """
+    lines = ["# AmiCachy — generated from Early Startup Control (Custom)"]
+    if config_description:
+        lines.append(f"# {config_description}")
+    lines.append("amiga_model = A1200")
+    lines.append(f"chip_memory = {chipmem * 512}")
+    lines.append(f"fast_memory = {fastmem * 1024}")
+    lines.append(f"kickstart_file = {rom.path}")
+    if rom.ext_path:
+        lines.append(f"kickstart_ext_file = {rom.ext_path}")
+    for i, hdf_path in enumerate(hdfs):
+        lines.append(f"hard_drive_{i} = {hdf_path}")
+        lines.append(f"hard_drive_{i}_label = DH{i}")
+    if hdfs:
+        lines.append("hard_drive_0_priority = 0")
+    lines.extend((
+        "fullscreen = 1",
+        "keep_aspect = 1",
+    ))
+    return "\n".join(lines) + "\n"
+
+
+def write_session_fsuae(
+    rom: RomEntry,
+    hdfs: list[str],
+    chipmem: int,
+    fastmem: int,
+) -> None:
+    text = _render_fsuae_custom(rom, hdfs, chipmem, fastmem)
+    os.makedirs(os.path.dirname(SESSION_FSUAE), exist_ok=True)
+    with open(SESSION_FSUAE, "w") as f:
+        f.write(text)
+    write_session_ref(SESSION_FSUAE)
+
+
+def write_saved_fsuae(
+    rom: RomEntry,
+    hdfs: list[str],
+    chipmem: int,
+    fastmem: int,
+) -> str | None:
+    """Persist a .fs-uae as the boot default + write the session ref."""
+    write_session_fsuae(rom, hdfs, chipmem, fastmem)
+    text = _render_fsuae_custom(
+        rom, hdfs, chipmem, fastmem,
+        config_description="AmiCachy Default",
+    )
+    try:
+        os.makedirs(os.path.dirname(SAVED_FSUAE), exist_ok=True)
+        with open(SAVED_FSUAE, "w") as f:
+            f.write(text)
+        return write_boot_ref(SAVED_FSUAE)
+    except OSError as exc:
+        return str(exc)
