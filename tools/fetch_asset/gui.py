@@ -745,17 +745,43 @@ class FetchAssetWindow(QWidget):
     # --- Worker callbacks ----------------------------------------------------
 
     def _on_progress(self, stage: str, current: int, total: int):
+        # Some HTTP servers don't send Content-Length, which leaves total=0
+        # and would otherwise put Qt's progress bar in indeterminate-busy
+        # mode (it animates 'full' constantly, looking stuck). Fall back
+        # to the size we have from the catalog or a stat of the source file.
+        if total <= 0:
+            total = self._expected_total()
+
         self._status.setText(stage)
         if total <= 0:
-            self._bar.setRange(0, 0)  # indeterminate
+            # Truly unknown size: scale with the largest value we've seen
+            # so far. The bar still moves — it just doesn't predict the end.
+            self._bar.setRange(0, max(current, 1))
+            self._bar.setValue(current)
+            return
+
+        # Avoid integer overflow on >2 GB downloads when value > 2^31.
+        if total > 100_000_000:
+            self._bar.setRange(0, 100)
+            self._bar.setValue(min(100, int(100 * current / total)))
         else:
-            # Avoid integer overflow on > 2 GB downloads when value > 2^31.
-            if total > 100_000_000:
-                self._bar.setRange(0, 100)
-                self._bar.setValue(int(100 * current / total))
-            else:
-                self._bar.setRange(0, total)
-                self._bar.setValue(current)
+            self._bar.setRange(0, total)
+            self._bar.setValue(min(current, total))
+
+    def _expected_total(self) -> int:
+        """Best-effort asset size when the worker source doesn't supply one."""
+        if self._worker is None:
+            return 0
+        kind = self._worker.kind
+        payload = self._worker.payload
+        if kind == "catalog":
+            return int(getattr(payload.get("asset"), "size_bytes", 0) or 0)
+        if kind == "file":
+            try:
+                return Path(payload["path"]).stat().st_size
+            except OSError:
+                return 0
+        return 0  # url: we don't know up front
 
     def _on_done(self, path: str):
         self._set_busy(False)
