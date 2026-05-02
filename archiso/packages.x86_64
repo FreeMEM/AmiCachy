@@ -62,6 +62,10 @@ enet
 tinyxml2
 gnu-free-fonts
 
+# Alternative emulator (FS-UAE) — used for AROS bundles where Amiberry's
+# Picasso96 driver hits a horizontal-tiling bug on cage+SDL2+Wayland.
+fs-uae
+
 # Development profile
 code
 python

@@ -199,6 +199,8 @@ class EarlyStartupMenu(QWidget):
         self._profile_paths: list[str | None] = [None]  # None = custom mode
         for cfg_path in self._user_configs:
             label = os.path.basename(cfg_path)
+            # Visual hint about which emulator the profile targets.
+            label += "    [FS-UAE]" if cfg_path.lower().endswith(".fs-uae") else "    [Amiberry]"
             self._profile_combo.addItem(label)
             self._profile_paths.append(cfg_path)
 
@@ -262,7 +264,8 @@ class EarlyStartupMenu(QWidget):
         rom_inner.addStretch()
         mid_row.addWidget(self._rom_frame, stretch=1)
 
-        # Emulator
+        # Emulator (read-only indicator: the profile's filename extension
+        # decides which emulator runs it — .uae → Amiberry, .fs-uae → FS-UAE).
         self._emu_frame = _section_frame()
         emu_inner = QVBoxLayout(self._emu_frame)
         emu_inner.addWidget(_section_title("Emulator"))
@@ -271,13 +274,12 @@ class EarlyStartupMenu(QWidget):
         self._radio_amiberry.setChecked(True)
         emu_inner.addWidget(self._radio_amiberry)
 
+        self._radio_fsuae = QRadioButton("FS-UAE")
+        emu_inner.addWidget(self._radio_fsuae)
+
         self._radio_winuae = QRadioButton("WinUAE (not available)")
         self._radio_winuae.setEnabled(False)
         emu_inner.addWidget(self._radio_winuae)
-
-        self._radio_puae = QRadioButton("PUAE (not available)")
-        self._radio_puae.setEnabled(False)
-        emu_inner.addWidget(self._radio_puae)
 
         emu_inner.addStretch()
         mid_row.addWidget(self._emu_frame, stretch=1)
@@ -373,6 +375,15 @@ class EarlyStartupMenu(QWidget):
         custom = self._profile_paths[index] is None
         for w in self._edit_widgets:
             w.setEnabled(custom)
+
+        # Reflect the selected profile's emulator on the radio buttons.
+        # Custom mode is always Amiberry-only for now (writing fs-uae configs
+        # from the menu would require a separate template path).
+        path = self._profile_paths[index]
+        if path is not None and path.lower().endswith(".fs-uae"):
+            self._radio_fsuae.setChecked(True)
+        else:
+            self._radio_amiberry.setChecked(True)
 
     # --- Actions ---
 

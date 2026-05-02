@@ -172,6 +172,40 @@ quarantine_uae() {
     fi
 }
 
+# --- Emulator dispatcher ---
+# Picks the right emulator based on the config file extension:
+#   *.uae     → Amiberry (the default for everything)
+#   *.fs-uae  → FS-UAE   (used for AROS-derived bundles where Amiberry's
+#                          Picasso96 driver tiles the framebuffer horizontally
+#                          on cage+SDL2+Wayland — see commit history for
+#                          details).
+# Both extensions live side by side in /home/amiga/Amiberry/conf/, the Early
+# Startup Control lists both, and dispatch happens here without conversion.
+run_emulator() {
+    local config="$1"
+    if [[ "$config" == *.fs-uae ]]; then
+        run_fsuae "$config"
+    else
+        run_amiberry "$config"
+    fi
+}
+
+# --- Run FS-UAE inside cage ---
+run_fsuae() {
+    local config="$1"
+    if [[ ! -s "$config" ]]; then
+        launch_fallback "FS-UAE config missing or empty: $config"
+        return
+    fi
+    local logfile="/tmp/fsuae-launch.log"
+    cage -- bash -c '"${@}" 2>&1 | tee '"$logfile"'; exit ${PIPESTATUS[0]}' _ \
+        /usr/bin/fs-uae "$config"
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        launch_fallback "fs-uae exited with code $rc (config: $config). Log: $logfile"
+    fi
+}
+
 # --- Run amiberry with crash protection (prevents autologin loop) ---
 run_amiberry() {
     local requested="$1"
@@ -222,20 +256,20 @@ case "$PROFILE" in
     classic_68k)
         if [[ -x "$AMIBERRY_BIN" ]]; then
             if [[ -n "$EARLY_STARTUP_UAE" ]]; then
-                run_amiberry "$EARLY_STARTUP_UAE"
+                run_emulator "$EARLY_STARTUP_UAE"
             elif [[ -f "$BOOT_CONFIG" ]]; then
                 _bref=$(<"$BOOT_CONFIG")
                 _bref="${_bref%$'\n'}"
                 if [[ -f "$_bref" ]]; then
-                    run_amiberry "$_bref"
+                    run_emulator "$_bref"
                 else
-                    run_amiberry "${UAE_DIR}/a1200.uae"
+                    run_emulator "${UAE_DIR}/a1200.uae"
                 fi
             elif [[ -f "$SAVED_UAE" ]]; then
                 # Legacy fallback
-                run_amiberry "$SAVED_UAE"
+                run_emulator "$SAVED_UAE"
             else
-                run_amiberry "${UAE_DIR}/a1200.uae"
+                run_emulator "${UAE_DIR}/a1200.uae"
             fi
         else
             launch_fallback "amiberry not found (classic_68k)"

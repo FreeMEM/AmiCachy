@@ -117,20 +117,29 @@ def scan_hdfs() -> list[str]:
 
 
 def scan_user_configs() -> list[str]:
-    """List .uae files in USER_CONF_DIR, excluding internal files.
+    """List .uae and .fs-uae files in USER_CONF_DIR, excluding internal files.
 
-    Returns absolute paths sorted by filename.
+    Returns absolute paths sorted by filename. Both Amiberry (.uae) and
+    FS-UAE (.fs-uae) profiles live in the same directory; amilaunch.sh
+    dispatches to the right emulator at boot time based on the file
+    extension. The user can pick either kind from the same dropdown.
     """
     configs: list[str] = []
     if not os.path.isdir(USER_CONF_DIR):
         return configs
     for fname in sorted(os.listdir(USER_CONF_DIR)):
-        if not fname.lower().endswith(".uae"):
+        lower = fname.lower()
+        if not (lower.endswith(".uae") or lower.endswith(".fs-uae")):
             continue
         if fname in _INTERNAL_FILES:
             continue
         configs.append(os.path.join(USER_CONF_DIR, fname))
     return configs
+
+
+def emulator_for(path: str) -> str:
+    """Return 'fs-uae' or 'amiberry' depending on the config file extension."""
+    return "fs-uae" if path.lower().endswith(".fs-uae") else "amiberry"
 
 
 # ---------------------------------------------------------------------------
