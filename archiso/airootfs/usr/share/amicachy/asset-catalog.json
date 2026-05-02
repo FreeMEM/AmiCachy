@@ -67,6 +67,21 @@
           "floppy_speed": 100,
           "kickstart_rom_file": "${FS_ROOT}/boot/amiga/aros-rom.bin",
           "kickstart_ext_rom_file": "${FS_ROOT}/boot/amiga/aros-ext.bin"
+        },
+        "_fsuae_comment": "Companion FS-UAE profile used when the user wants the bundle's native Picasso96 RTG. Slower than the Amiberry+AGA path (dir-mount syscalls go through fs-uae's filesystem driver) but renders without the horizontal-tiling bug. Boot can take 5-8 minutes the first time; treat as 'experimental' until this gets backed by an HDF.",
+        "fsuae_template": {
+          "amiga_model": "A1200",
+          "chip_memory": 8192,
+          "slow_memory": 0,
+          "zorro_iii_memory": 262144,
+          "graphics_card": "uaegfx-z3",
+          "graphics_memory": 131072,
+          "cpu": "68020",
+          "fpu": "68882",
+          "cpu_speed": "max",
+          "jit_compiler": 1,
+          "kickstart_file": "${FS_ROOT}/boot/amiga/aros-rom.bin",
+          "kickstart_ext_file": "${FS_ROOT}/boot/amiga/aros-ext.bin"
         }
       }
     }
