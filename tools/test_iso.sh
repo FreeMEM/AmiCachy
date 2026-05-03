@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AmiCachy — Launch the ISO in a KVM/libvirt VM for testing.
-# Uses virt-install with UEFI boot, SPICE display, and a scratch disk
+# The ISO is attached as a removable USB stick (xHCI) so the firmware
+# sees the same kind of boot device a user would have when flashing
+# AmiCachy to a pendrive — not a CD-ROM. Plus a virtio scratch disk
 # for testing the installer.
 
 set -euo pipefail
@@ -20,7 +22,8 @@ usage() {
     echo "The VM is created with:"
     echo "  - UEFI boot (OVMF)"
     echo "  - ${RAM} MiB RAM, ${CPUS} vCPUs"
-    echo "  - ${DISK_SIZE} GiB virtio scratch disk"
+    echo "  - ISO attached as removable USB stick (xHCI), boot order 1"
+    echo "  - ${DISK_SIZE} GiB virtio scratch disk (install target), boot order 2"
     echo "  - SPICE display (opens virt-viewer)"
     echo ""
     echo "Options:"
@@ -128,8 +131,9 @@ virt-install \
     --vcpus "$CPUS" \
     --machine q35 \
     --boot uefi,loader="$OVMF_CODE",loader.readonly=yes,loader.type=pflash \
-    --cdrom "$ISO_PATH" \
-    --disk size="$DISK_SIZE",bus=virtio,format=qcow2 \
+    --controller usb,model=qemu-xhci \
+    --disk path="$ISO_PATH",device=disk,bus=usb,readonly=on,format=raw,boot.order=1,target.removable=on \
+    --disk size="$DISK_SIZE",bus=virtio,format=qcow2,boot.order=2 \
     --os-variant archlinux \
     --network network=default,model=virtio \
     --graphics spice,listen=none \
