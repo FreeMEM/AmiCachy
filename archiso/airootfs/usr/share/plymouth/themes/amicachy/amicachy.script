@@ -52,6 +52,16 @@ spinner.sprite.SetPosition(spinner_x, spinner_y, 10000);
 message.sprite = Sprite();
 message.sprite.SetPosition(0, 0, -1);
 
+// --- F5 hint (bottom-right) ---
+hint.image = Image.Text("Pulsa F5 para Early Startup", 0.7, 0.7, 0.7);
+hint.sprite = Sprite(hint.image);
+hint.sprite.SetPosition(
+    Window.GetWidth()  - hint.image.GetWidth()  - 20,
+    Window.GetHeight() - hint.image.GetHeight() - 20,
+    10001
+);
+hint.sprite.SetOpacity(1);
+
 // --- Refresh callback (~50fps) ---
 fun refresh_callback() {
     // Advance animation frame
@@ -87,6 +97,7 @@ fun quit_callback() {
     anim.sprite.SetOpacity(0);
     spinner.sprite.SetOpacity(0);
     message.sprite.SetOpacity(0);
+    hint.sprite.SetOpacity(0);
 }
 
 Plymouth.SetRefreshFunction(refresh_callback);
