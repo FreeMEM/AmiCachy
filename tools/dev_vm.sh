@@ -327,12 +327,48 @@ cmd_create() {
     local PACMAN_CONF
     PACMAN_CONF=$(get_pacman_conf "$PROJECT_DIR/archiso/pacman.conf")
 
+    # Wire up the local repo for amiberry (and any other in-tree packages),
+    # mirroring what build_iso.sh does so dev_vm and the shipped ISO install
+    # the same way. Skipped if no .pkg.tar.zst is present in out/ — in that
+    # case the user can still install amiberry post-create with `dev_vm.sh
+    # install out/amiberry-*.pkg.tar.zst`.
+    local LOCAL_REPO="${DEV_DIR}/local-repo"
+    rm -rf "$LOCAL_REPO"
+    local local_pkgs=()
+    for f in "${PROJECT_DIR}/out/"amiberry-*.pkg.tar.zst; do
+        [[ -f "$f" ]] && local_pkgs+=("$f")
+    done
+    if [[ ${#local_pkgs[@]} -gt 0 ]]; then
+        require_cmd repo-add
+        mkdir -p "$LOCAL_REPO"
+        # Latest by name (amiberry-7.1.1-2 sorts after -1)
+        cp "${local_pkgs[-1]}" "$LOCAL_REPO/"
+        echo ":: Local repo: $(basename "${local_pkgs[-1]}")"
+        repo-add "${LOCAL_REPO}/amicachy-local.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst >/dev/null
+
+        local PACMAN_DEV_CONF="${DEV_DIR}/pacman-dev.conf"
+        cp "$PACMAN_CONF" "$PACMAN_DEV_CONF"
+        cat >> "$PACMAN_DEV_CONF" <<EOF
+
+[amicachy-local]
+SigLevel = Never
+Server = file:///work/dev/local-repo
+EOF
+        PACMAN_CONF="$PACMAN_DEV_CONF"
+        PACKAGES="$PACKAGES amiberry"
+    else
+        echo ":: WARNING: no amiberry-*.pkg.tar.zst in out/ — VM won't have amiberry"
+        echo "   Build it first: ./tools/build_amiberry.sh"
+    fi
+
     echo ":: Running pacstrap inside Docker (${DOCKER_IMAGE})..."
     echo "   CPU arch level: ${CPU_ARCH_LEVEL}"
     echo "   This will take several minutes on first run."
     echo ""
 
-    # If generic CPU, mount the filtered pacman.conf over the original
+    # If we built a custom pacman.conf (generic CPU or local repo), mount
+    # it into the container as /work/archiso/pacman-build.conf so the
+    # bash-c block below picks it up via the existing override mechanism.
     local EXTRA_DOCKER_ARGS=()
     if [[ "$PACMAN_CONF" != "$PROJECT_DIR/archiso/pacman.conf" ]]; then
         EXTRA_DOCKER_ARGS=(-v "${PACMAN_CONF}:/work/archiso/pacman-build.conf:ro")
