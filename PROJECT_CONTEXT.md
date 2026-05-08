@@ -10,7 +10,7 @@ Hemos elegido CachyOS (basado en Arch) por tres razones críticas:
 - **Sin Mitigaciones:** Para maximizar la emulación PPC (AmigaOS 4.1), el sistema debe permitir desactivar las mitigaciones de seguridad del procesador (Spectre/Meltdown), priorizando la velocidad bruta sobre la seguridad de red.
 
 ## 3. El Desafío PowerPC (PPC)
-El objetivo es que un PC moderno, mediante Amiberry 7.1 y QEMU-PPC, "debería" superar en rendimiento a hardware nativo costoso como el AmigaOne X5000. Para ello, necesitamos una detección de hardware precisa que asigne prioridades de tiempo real al proceso de emulación.
+El objetivo es que un PC moderno, mediante Amiberry 8.1 y QEMU-PPC, "debería" superar en rendimiento a hardware nativo costoso como el AmigaOne X5000. Para ello, necesitamos una detección de hardware precisa que asigne prioridades de tiempo real al proceso de emulación.
 
 ## 4. Entorno de Desarrollo Híbrido
 El proyecto incluye un perfil especial de arranque para programadores. Estoy desarrollando un lenguaje que transpila a C nativo de Amiga y una extensión de VS Code para diseñar interfaces MUI. 

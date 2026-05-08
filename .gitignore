@@ -2,7 +2,16 @@
 out/
 work/
 dev/
+airootfs_export/
 *.iso
+
+# Local assistant/tooling state
+.claude/
+
+# Local extracted system payloads; provided by packages in the ISO build
+archiso/airootfs/usr/bin/iw
+archiso/airootfs/usr/lib/firmware/regulatory.db*
+archiso/airootfs/usr/share/terminfo/
 
 # Amiga ROMs and proprietary files
 *.rom

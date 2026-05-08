@@ -73,11 +73,27 @@ bundle_installer_data() {
     cp -a "${PROJECT_DIR}/tools/hardware_audit.py" "${DEST_TOOLS}/hardware_audit.py"
     echo "   -> tools/hardware_audit.py -> airootfs (tools/)"
 
-    # packages list and pacman.conf for the installer's install-to-disk step
+    # Payload used by the offline installer's install-to-disk step.
     mkdir -p "${DEST_INST}"
     cp -a "${PROFILE_DIR}/packages.x86_64" "${DEST_INST}/packages.x86_64"
     cp -a "${PROFILE_DIR}/pacman.conf"     "${DEST_INST}/pacman.conf"
-    echo "   -> packages.x86_64, pacman.conf -> airootfs (installer/)"
+    for script in amilaunch.sh amicachy-amiberry-session start_dev_env.sh amicachy-copy-roms; do
+        if [[ -f "${AIROOTFS}/usr/bin/${script}" ]]; then
+            cp -a "${AIROOTFS}/usr/bin/${script}" "${DEST_INST}/${script}"
+        fi
+    done
+    if [[ -d "${AIROOTFS}/usr/share/amicachy/uae" ]]; then
+        mkdir -p "${DEST_INST}/uae"
+        cp -a "${AIROOTFS}/usr/share/amicachy/uae/"* "${DEST_INST}/uae/"
+    fi
+    if [[ -d "${AIROOTFS}/etc/amicachy/labwc-emulator" ]]; then
+        cp -a "${AIROOTFS}/etc/amicachy/labwc-emulator" "${DEST_INST}/labwc-emulator"
+    fi
+    if [[ -d "${AIROOTFS}/etc/skel/.config/labwc" ]]; then
+        mkdir -p "${DEST_INST}/labwc"
+        cp -a "${AIROOTFS}/etc/skel/.config/labwc/"* "${DEST_INST}/labwc/"
+    fi
+    echo "   -> offline installer payload -> airootfs (installer/)"
 
     echo "   Bundle complete."
 }
@@ -90,8 +106,7 @@ unbundle_installer_data() {
     local AIROOTFS="${PROFILE_DIR}/airootfs"
     rm -rf "${AIROOTFS}/usr/share/amicachy/tools/installer"
     rm -f  "${AIROOTFS}/usr/share/amicachy/tools/hardware_audit.py"
-    rm -f  "${AIROOTFS}/usr/share/amicachy/installer/packages.x86_64"
-    rm -f  "${AIROOTFS}/usr/share/amicachy/installer/pacman.conf"
+    rm -rf "${AIROOTFS}/usr/share/amicachy/installer"
 }
 
 setup_local_packages() {
@@ -121,7 +136,7 @@ setup_local_packages() {
     cp "$latest_pkg" "$LOCAL_REPO/"
     echo "   -> $(basename "$latest_pkg")"
 
-    # Create repo database
+# Create repo database. Name must match the [amicachy-local] section below.
     repo-add "${LOCAL_REPO}/amicachy-local.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst
 
     # Add local repo to pacman.conf
@@ -133,8 +148,13 @@ SigLevel = Never
 Server = file://${LOCAL_REPO}
 EOF
 
-    # Add amiberry to the package list
-    echo "amiberry" >> "${PROFILE_DIR}/packages.x86_64"
+    # Add amiberry to the package list only if it is not already present.
+    if grep -qxF "amiberry" "${PROFILE_DIR}/packages.x86_64"; then
+        ADDED_AMIBERRY_PACKAGE=0
+    else
+        echo "amiberry" >> "${PROFILE_DIR}/packages.x86_64"
+        ADDED_AMIBERRY_PACKAGE=1
+    fi
 
     HAS_LOCAL_REPO=1
     echo "   Local repo ready. amiberry will be included in the ISO."
@@ -144,10 +164,15 @@ cleanup_local_packages() {
     if [[ "${HAS_LOCAL_REPO:-0}" -eq 1 ]]; then
         echo ":: Cleaning local package repository..."
         rm -rf "${PROFILE_DIR}/local-repo"
-        # Remove appended local repo section from pacman.conf
-        sed -i '/^# --- AmiCachy Local Repo/,$ d' "${PROFILE_DIR}/pacman.conf"
-        # Remove amiberry line from packages.x86_64
-        sed -i '/^amiberry$/d' "${PROFILE_DIR}/packages.x86_64"
+        # Avoid sed -i here: pacman.conf may be a Docker bind-mounted file on Windows.
+        awk '/^# --- AmiCachy Local Repo/ { exit } { print }' "${PROFILE_DIR}/pacman.conf" > "${PROFILE_DIR}/pacman.conf.tmp"
+        cat "${PROFILE_DIR}/pacman.conf.tmp" > "${PROFILE_DIR}/pacman.conf"
+        rm -f "${PROFILE_DIR}/pacman.conf.tmp"
+        if [[ "${ADDED_AMIBERRY_PACKAGE:-0}" -eq 1 ]]; then
+            awk '$0 != "amiberry" { print }' "${PROFILE_DIR}/packages.x86_64" > "${PROFILE_DIR}/packages.x86_64.tmp"
+            cat "${PROFILE_DIR}/packages.x86_64.tmp" > "${PROFILE_DIR}/packages.x86_64"
+            rm -f "${PROFILE_DIR}/packages.x86_64.tmp"
+        fi
     fi
 }
 

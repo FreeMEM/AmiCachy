@@ -5,26 +5,27 @@ linux-firmware
 mkinitcpio
 mkinitcpio-archiso
 syslinux
-
 # Bootloader (bootctl is part of systemd, included in base)
 efibootmgr
-
+lvm2
 # Filesystem
 btrfs-progs
 dosfstools
 e2fsprogs
 ntfs-3g
-
+exfatprogs
 # Network (minimal for live env)
 networkmanager
 iwd
 dhcpcd
-
+iw
+wireless-regdb
+broadcom-wl-dkms
+linux-cachyos-headers
 # Wayland compositors (wlroots pulled as dependency of cage/labwc)
 cage
 labwc
 xorg-xwayland
-
 # Wayland desktop utilities
 waybar
 foot
@@ -33,24 +34,20 @@ mako
 grim
 slurp
 wl-clipboard
-
 # Audio
 pipewire
 pipewire-pulse
 pipewire-alsa
 wireplumber
-
 # Graphics drivers (broad support)
 mesa
 vulkan-radeon
 vulkan-intel
 intel-media-driver
 xf86-video-amdgpu
-
-# Amiberry runtime dependencies
-sdl2
-sdl2_image
-sdl2_ttf
+# Amiberry runtime dependencies (SDL3 since v8.x)
+sdl3
+sdl3_image
 libmpeg2
 libpng
 zlib
@@ -60,6 +57,8 @@ libserialport
 portmidi
 enet
 tinyxml2
+nlohmann-json
+curl
 gnu-free-fonts
 
 # Alternative emulator (FS-UAE) — used for AROS bundles where Amiberry's
@@ -72,6 +71,8 @@ python
 pyside6
 qt6-wayland
 
+# Offline AmiCachy installer
+rsync
 # System tools
 htop
 nano
@@ -81,11 +82,18 @@ man-db
 sudo
 openssh
 terminus-font
-
+# Disk automount (USB drives, internal SSDs)
+udisks2
+udiskie
+polkit
 # Boot splash
 plymouth
+# Intel RST / RAID support
+dmraid
+mdadm
 
 # Installer & audit dependencies
 parted
 gptfdisk
 arch-install-scripts
+amiberry

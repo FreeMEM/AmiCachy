@@ -4,9 +4,10 @@
 
 set -uo pipefail
 
-# Clear the VT immediately to avoid flashing the login prompt
-# between Plymouth quit and Cage startup.
-clear
+# Clear the VT immediately and hide the cursor to avoid
+# flashing the login prompt between Plymouth and Cage.
+printf '\e[?25l' > /dev/tty1 2>/dev/null || true
+printf '\033[H\033[2J\033[3J' > /dev/tty1 2>/dev/null || true
 
 UAE_DIR="/usr/share/amicachy/uae"
 SAVED_UAE="/home/amiga/Amiberry/conf/amicachy-default.uae"
@@ -14,6 +15,7 @@ SESSION_CONFIG="/tmp/amicachy-session-config"
 BOOT_CONFIG="/home/amiga/Amiberry/conf/amicachy-boot-config"
 AMIBERRY_BIN="/usr/bin/amiberry"
 AMIBERRY_HOME="/usr/share/amiberry"
+LABWC_EMULATOR_CONFIG="/etc/amicachy/labwc-emulator"
 
 # --- CPU architecture check ---
 # If the system has x86-64-v3 packages but the CPU lacks AVX2, binaries
@@ -29,7 +31,7 @@ check_cpu_compat() {
 
             # Use printf to write directly to the framebuffer console (tty)
             # since Wayland compositors won't start with v3 SIGILL
-            clear
+            printf '\033[H\033[2J\033[3J'
             echo ""
             echo "============================================================"
             echo "  AmiCachy — CPU Incompatible"
@@ -86,9 +88,18 @@ XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
 mkdir -p "$XDG_RUNTIME_DIR"
 
-# Read keyboard layout from vconsole.conf; fall back to "us"
-_keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf 2>/dev/null || echo "us")
-export XKB_DEFAULT_LAYOUT="${_keymap:-us}"
+# Map vconsole KEYMAP → XKB layout.
+# Most keymaps (es, de, fr, us) map directly; strip suffixes like
+# la-latin1 → la, uk → gb.  Suppress errors if vconsole.conf is missing.
+_raw_keymap=$(sed -n 's/^KEYMAP=//p' /etc/vconsole.conf 2>/dev/null || echo "us")
+_raw_keymap="${_raw_keymap:-us}"
+# Strip common vconsole suffixes to get the XKB base layout
+_xkb_layout="${_raw_keymap%%-*}"  # la-latin1 → la, es-deadtilde → es
+# Some well-known translations
+case "$_xkb_layout" in
+    uk) _xkb_layout="gb" ;;
+esac
+export XKB_DEFAULT_LAYOUT="$_xkb_layout"
 export XDG_SESSION_TYPE="wayland"
 export SDL_VIDEODRIVER="wayland"
 export MOZ_ENABLE_WAYLAND=1
@@ -109,10 +120,20 @@ if [[ -f /usr/local/lib/libSDL2-2.0.so.0 ]]; then
     export SDL_DYNAMIC_API="/usr/local/lib/libSDL2-2.0.so.0"
 fi
 
+# Mouse click fix for Amiberry on Wayland/Cage
+export SDL_HINT_MOUSE_AUTO_CAPTURE=0
+
+# Ensure the user has access to input devices (if not already handled)
+# Usermod might fail in live env if not careful, but adding to group is safer.
+usermod -aG input amiga 2>/dev/null || true
+
 # --- Early Startup Control (hold F5 during boot) ---
 EARLY_STARTUP_UAE=""
 if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" && "$PROFILE" != "asset_manager" ]]; then
-    if python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
+    # Read input as root: the current login session does not gain new input-group
+    # membership from usermod until the next login.
+    if sudo -n python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
+        release_boot_splash
         cage -- /usr/bin/amicachy-earlystartup 2>/dev/null
         if [[ $? -eq 0 && -f "$SESSION_CONFIG" ]]; then
             _ref=$(<"$SESSION_CONFIG")
@@ -123,6 +144,79 @@ if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" && "$PROFILE" != 
         fi
     fi
 fi
+
+# --- Start automount daemon ---
+# Runs silently in the background to automatically mount USB and internal drives.
+# Drives will be mounted to /run/media/amiga/<Label>.
+start_automount() {
+    local log="/tmp/udiskie.log"
+
+    if ! command -v udiskie >/dev/null 2>&1; then
+        echo "udiskie not found; USB automount disabled" >> "$log"
+        return 0
+    fi
+
+    if pgrep -xu "$(id -u)" udiskie >/dev/null 2>&1; then
+        return 0
+    fi
+
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+    if command -v dbus-run-session >/dev/null 2>&1; then
+        dbus-run-session -- udiskie --automount --no-tray --no-notify >> "$log" 2>&1 &
+    else
+        udiskie --automount --no-tray --no-notify >> "$log" 2>&1 &
+    fi
+}
+start_automount
+
+expose_boot_media() {
+    local bootmnt="/run/archiso/bootmnt"
+    local media_dir="/run/media/amiga"
+    local label=""
+    local source=""
+
+    [[ -d "$bootmnt" ]] || return 0
+
+    source="$(findmnt -n -o SOURCE "$bootmnt" 2>/dev/null || true)"
+    if [[ -n "$source" && "$source" == /dev/* ]]; then
+        label="$(lsblk -no LABEL "$source" 2>/dev/null | head -1 | xargs || true)"
+    fi
+    if [[ -z "$label" ]]; then
+        read -ra _cmdline_media < /proc/cmdline
+        for param in "${_cmdline_media[@]}"; do
+            case "$param" in
+                archisolabel=*) label="${param#archisolabel=}" ;;
+            esac
+        done
+    fi
+    label="${label:-AMICACHYUSB}"
+
+    mkdir -p "$media_dir"
+    chown amiga:amiga "$media_dir" 2>/dev/null || true
+    ln -sfn "$bootmnt" "${media_dir}/${label}"
+    chown -h amiga:amiga "${media_dir}/${label}" 2>/dev/null || true
+}
+
+expose_boot_media
+
+
+# Plymouth owns the boot splash while the live system starts. Make sure it
+# releases DRM/TTY before Cage or Labwc tries to draw the selected profile.
+release_boot_splash() {
+    if command -v plymouth >/dev/null 2>&1; then
+        sudo -n timeout 1 plymouth quit 2>/dev/null || true
+        sudo -n pkill -TERM -x plymouthd 2>/dev/null || true
+        sleep 0.2
+        sudo -n pkill -KILL -x plymouthd 2>/dev/null || true
+    fi
+    printf '\033[H\033[2J\033[3J' > /dev/tty1 2>/dev/null || true
+    printf '\e[?25l' > /dev/tty1 2>/dev/null || true
+}
+
+release_boot_splash
+
 
 # --- Fallback: launch a terminal with system info ---
 launch_fallback() {
@@ -206,11 +300,48 @@ run_fsuae() {
     fi
 }
 
+run_installer() {
+    local log="/tmp/amicachy-installer.log"
+
+    : > "$log"
+    chmod 666 "$log" 2>/dev/null || true
+
+    cage -- /usr/bin/amicachy-installer >> "$log" 2>&1
+    local rc=$?
+
+    printf '\033[H\033[2J\033[3J' > /dev/tty1 2>/dev/null || true
+    {
+        echo "AmiCachy installer exited before showing the UI."
+        echo "Exit code: $rc"
+        echo "Log: $log"
+    } > /dev/tty1 2>/dev/null || true
+
+    exec cage -- foot -e bash -c "
+        echo '═══════════════════════════════════════════'
+        echo '  AmiCachy — Installer did not start'
+        echo '═══════════════════════════════════════════'
+        echo ''
+        echo '  Exit code: ${rc}'
+        echo '  Log file:  ${log}'
+        echo ''
+        if [[ -s '${log}' ]]; then
+            echo '  Last log lines:'
+            echo ''
+            tail -n 80 '${log}'
+        else
+            echo '  The installer produced no log output.'
+        fi
+        echo ''
+        echo '═══════════════════════════════════════════'
+        exec bash
+    " || exec bash
+}
+
 # --- Run amiberry with crash protection (prevents autologin loop) ---
 run_amiberry() {
     local requested="$1"
     shift
-    local config="$requested"
+local config="$requested"
 
     # Pre-flight: a corrupt/empty .uae would segfault Amiberry on load and,
     # because amilaunch is the autologin entry point, trap us in a crash loop.
@@ -220,22 +351,16 @@ run_amiberry() {
         config="${UAE_DIR}/a1200.uae"
     fi
 
-    local args=("$@" "$AMIBERRY_BIN")
-    if [[ -f "$config" ]]; then
-        args+=(--config "$config" -s use_gui=no)
-    else
-        echo "Config not found: $config — launching Amiberry GUI" >&2
+    local session_cmd="/usr/bin/amicachy-amiberry-session"
+    local rt_flag=""
+    if [[ "${1:-}" == "rt" ]]; then
+        rt_flag="--rt"
     fi
-
-    # Amiberry expects its install root as the working directory
-    # (data/, controllers/, whdboot/, etc. relative to cwd)
-    cd "$AMIBERRY_HOME" || true
-
-    # Capture all output for debugging (readable via SSH or dev_vm.sh log)
     local logfile="/tmp/amiberry-launch.log"
 
-    # Run inside cage; wrap amiberry in a shell to capture its stderr
-    cage -- bash -c '"${@}" 2>&1 | tee '"$logfile"'; exit ${PIPESTATUS[0]}' _ "${args[@]}"
+    # labwc gives us libinput touchpad controls (tap-to-click/clickfinger),
+    # while Amiberry still owns the full-screen application surface.
+    labwc -C "$LABWC_EMULATOR_CONFIG" -S "$session_cmd $rt_flag '$config'"
     local rc=$?
     if [[ $rc -ne 0 ]]; then
         # Post-mortem: a crash mid-save can truncate the requested .uae to 0 bytes.
@@ -251,7 +376,7 @@ run_amiberry() {
 # --- Dispatch based on profile ---
 case "$PROFILE" in
     installer)
-        exec cage -- /usr/bin/amicachy-installer
+        run_installer
         ;;
     classic_68k)
         if [[ -x "$AMIBERRY_BIN" ]]; then
@@ -277,7 +402,7 @@ case "$PROFILE" in
         ;;
     ppc_nitro)
         if [[ -x "$AMIBERRY_BIN" ]]; then
-            run_amiberry "${UAE_DIR}/os41.uae" chrt -f 52
+            run_amiberry "${UAE_DIR}/os41.uae" rt
         else
             launch_fallback "amiberry not found (ppc_nitro)"
         fi

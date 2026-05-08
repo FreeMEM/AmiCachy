@@ -6,7 +6,7 @@
 - **Compositores Wayland:**
     - **Cage:** Para perfiles de emulación pura (lanza una sola app a pantalla completa).
     - **Labwc:** Para el perfil de desarrollo (manejo de ventanas ligero).
-- **Emulador:** Amiberry v7.1+ (compilado con soporte Wayland/KMS y SDL3).
+- **Emulador:** Amiberry v8.1+ (compilado con soporte Wayland/KMS y SDL3).
 - **Gestor de Arranque:** `systemd-boot` (rápido y minimalista).
 
 ## 2. Sistema de Perfiles (Multi-Boot)

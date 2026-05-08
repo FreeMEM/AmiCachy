@@ -15,7 +15,7 @@ La mayoria de los proyectos usan Debian por estabilidad, pero nosotros priorizam
 **Sin Mitigaciones:** Para usuarios que quieren exprimir el PowerPC, desactivaremos las mitigaciones de seguridad del kernel (Spectre/Meltdown). En un sistema retro-gaming/dev, ganar ese 10-15% de velocidad es mas importante que la seguridad de un servidor.
 
 ## 3. El Desafio del PowerPC (AmigaOS 4.1)
-El hardware nativo de Amiga PPC (como la AmigaOne X5000) es caro y dificil de conseguir. Queremos que este sistema, mediante Amiberry 7.1 y QEMU-PPC, supere (o al menos iguale) ese rendimiento.
+El hardware nativo de Amiga PPC (como la AmigaOne X5000) es caro y dificil de conseguir. Queremos que este sistema, mediante Amiberry 8.1 y QEMU-PPC, supere (o al menos iguale) ese rendimiento.
 
 Para lograrlo, el sistema debe ser capaz de autoconfigurarse. Si detecta un procesador potente, debe asignar prioridades de tiempo real al proceso de emulacion.
 
@@ -42,7 +42,7 @@ Con Cage, la cadena se reduce a:
 Kernel → Cage → Amiberry
 ```
 
-**Control total del frame.** Al ser un compositor de Wayland nativo, Cage le da a Amiberry el control total de la pantalla. Esto es lo que permite que Amiberry v7.1 use KMS (Kernel Mode Setting): la imagen va practicamente directa de la emulacion a la tarjeta grafica.
+**Control total del frame.** Al ser un compositor de Wayland nativo, Cage le da a Amiberry el control total de la pantalla. Esto es lo que permite que Amiberry v8.1 use KMS (Kernel Mode Setting): la imagen va practicamente directa de la emulacion a la tarjeta grafica.
 
 **Resultado:** nos quitamos de encima el 99% de los problemas de stuttering (tirones) y ese lag que hace que jugar al Pinball Dreams sea injugable.
 
@@ -222,7 +222,7 @@ Amiberry no esta disponible como paquete en los repositorios de Arch/CachyOS. Lo
 # Compilar el .pkg.tar.zst de amiberry dentro de Docker (~5 min)
 ./tools/build_amiberry.sh
 
-# Resultado: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
+# Resultado: out/amiberry-8.1.5-1-x86_64.pkg.tar.zst
 ```
 
 El PKGBUILD esta en `pkg/amiberry/PKGBUILD`.

@@ -1,0 +1,7 @@
+*.sh text eol=lf
+archiso/airootfs/etc/profile.d/*.sh text eol=lf
+archiso/airootfs/usr/bin/amicachy-* text eol=lf
+archiso/airootfs/usr/bin/amilaunch.sh text eol=lf
+archiso/airootfs/usr/bin/start_dev_env.sh text eol=lf
+tools/installer/*.py text eol=lf
+tools/earlystartup/*.py text eol=lf

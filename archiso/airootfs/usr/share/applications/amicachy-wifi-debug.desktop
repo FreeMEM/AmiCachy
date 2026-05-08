@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AmiCachy Wi-Fi Debug
+Comment=Collect Wi-Fi diagnostics into wifi-debug.txt
+Exec=foot -e sudo amicachy-wifi-debug
+Terminal=false
+Categories=Utility;System;

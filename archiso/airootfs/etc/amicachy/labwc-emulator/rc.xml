@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<labwc_config>
+  <libinput>
+    <device category="touchpad">
+      <tap>yes</tap>
+      <tapButtonMap>lrm</tapButtonMap>
+      <tapAndDrag>yes</tapAndDrag>
+      <clickMethod>clickfinger</clickMethod>
+      <naturalScroll>yes</naturalScroll>
+      <disableWhileTyping>no</disableWhileTyping>
+    </device>
+  </libinput>
+</labwc_config>

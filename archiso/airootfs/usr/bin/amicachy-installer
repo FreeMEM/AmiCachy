@@ -1,3 +1,29 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+# AmiCachy ships its own offline installer. Do not prefer Calamares here:
+# the upstream CachyOS profile requires network access for pacstrap/netinstall,
+# while AmiCachy should install the live system exactly as shipped on the ISO.
 export PYTHONPATH="/usr/share/amicachy/tools"
-exec python3 -m installer "$@"
+
+if [[ "${EUID}" -ne 0 ]]; then
+    user_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    wayland_display="${WAYLAND_DISPLAY:-wayland-0}"
+    if [[ "$wayland_display" != /* ]]; then
+        wayland_display="${user_runtime}/${wayland_display}"
+    fi
+
+    root_runtime="/tmp/amicachy-runtime-root"
+    sudo install -d -m 700 -o root -g root "$root_runtime"
+
+    exec sudo -E env \
+        PYTHONPATH="$PYTHONPATH" \
+        PYTHONUNBUFFERED=1 \
+        XDG_RUNTIME_DIR="$root_runtime" \
+        WAYLAND_DISPLAY="$wayland_display" \
+        QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}" \
+        XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}" \
+        python3 -m installer "$@"
+fi
+
+exec env PYTHONUNBUFFERED=1 python3 -m installer "$@"

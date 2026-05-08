@@ -1,6 +1,6 @@
 [Unit]
 Description=Load virtio_gpu after Plymouth
-After=plymouth-quit-wait.service
+After=plymouth-quit.service
 Before=getty.target
 
 [Service]

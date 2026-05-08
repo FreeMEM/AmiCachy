@@ -54,8 +54,12 @@ echo "   CPU arch level: ${CPU_ARCH_LEVEL}"
 echo "   Packages: $(if [[ "$CPU_ARCH_LEVEL" == "x86-64" ]]; then echo "generic x86-64"; else echo "x86-64-v3 (AVX2)"; fi)"
 echo ""
 
+echo ":: Pulling latest base image..."
+docker pull "$DOCKER_IMAGE"
+
 docker run --rm --privileged \
     -v "${PROJECT_DIR}:/work" \
+    -v "amicachy-pkg-cache:/var/cache/pacman/pkg" \
     "${EXTRA_DOCKER_ARGS[@]}" \
     -w /work \
     "$DOCKER_IMAGE" \

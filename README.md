@@ -15,7 +15,7 @@ Most projects use Debian for stability, but we prioritize latency and raw power.
 **No Mitigations:** For users who want to squeeze every bit of PowerPC performance, we disable kernel security mitigations (Spectre/Meltdown). In a retro-gaming/dev system, gaining that 10-15% speed boost matters more than server-grade security.
 
 ## 3. The PowerPC Challenge (AmigaOS 4.1)
-Native Amiga PPC hardware (like the AmigaOne X5000) is expensive and hard to find. We want this system, through Amiberry 7.1 and QEMU-PPC, to surpass (or at least match) that performance.
+Native Amiga PPC hardware (like the AmigaOne X5000) is expensive and hard to find. We want this system, through Amiberry 8.1 and QEMU-PPC, to surpass (or at least match) that performance.
 
 To achieve this, the system must be self-configuring. If it detects a powerful processor, it should assign real-time priorities to the emulation process.
 
@@ -42,7 +42,7 @@ With Cage, the chain becomes:
 Kernel → Cage → Amiberry
 ```
 
-**Full frame control.** As a native Wayland compositor, Cage gives Amiberry total control of the screen. This is what allows Amiberry v7.1 to use KMS (Kernel Mode Setting): the image goes practically straight from emulation to the graphics card.
+**Full frame control.** As a native Wayland compositor, Cage gives Amiberry total control of the screen. This is what allows Amiberry v8.1 to use KMS (Kernel Mode Setting): the image goes practically straight from emulation to the graphics card.
 
 **Result:** we eliminate 99% of stuttering problems and the lag that makes playing Pinball Dreams unplayable.
 
@@ -222,7 +222,7 @@ Amiberry is not available as a pre-built package in Arch/CachyOS repositories. W
 # Build the amiberry .pkg.tar.zst inside Docker (~5 min)
 ./tools/build_amiberry.sh
 
-# Output: out/amiberry-7.1.1-1-x86_64.pkg.tar.zst
+# Output: out/amiberry-8.1.5-1-x86_64.pkg.tar.zst
 ```
 
 The PKGBUILD is at `pkg/amiberry/PKGBUILD`.

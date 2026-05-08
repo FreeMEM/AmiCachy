@@ -91,8 +91,9 @@ def main() -> int:
     if not keyboards:
         return 1
 
-    # Sample 5 times over 500ms — F5 must be held on at least one sample.
-    for _ in range(5):
+    # Sample for a short window. USB keyboards on Macs can appear late enough
+    # that the original 500ms window misses a held F5.
+    for _ in range(25):
         for dev in keyboards:
             if _check_key(dev):
                 return 0

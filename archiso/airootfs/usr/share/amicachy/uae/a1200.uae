@@ -30,6 +30,8 @@ amiberry.gfx_auto_crop=true
 sound_output=exact
 sound_channels=stereo
 sound_frequency=44100
+sound_volume=0
+sound_volume_paula=0
 
 ; Floppy — empty (AROS boots from ROM)
 floppy_speed=100
@@ -38,3 +40,6 @@ floppy_speed=100
 input.joymouse_speed_analog=2
 joyport0=mouse
 joyport1=joy1
+magic_mouse=true
+magic_mousecursor=native
+absolute_mouse=mousehack

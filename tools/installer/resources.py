@@ -1,7 +1,6 @@
 """Text constants, boot entry templates, and installation paths."""
 
 MOUNTPOINT = "/mnt/amicachy"
-CACHYOS_GPG_KEY = "882DCFE48E2051D48E2562ABF3B607488DB35A47"
 INSTALLER_DATA_DIR = "/usr/share/amicachy/installer"
 INSTALL_LOG_PATH = "/tmp/amicachy-install.log"
 

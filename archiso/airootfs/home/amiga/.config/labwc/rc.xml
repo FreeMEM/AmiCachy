@@ -20,22 +20,22 @@
 
   <keyboard>
     <!-- Switch to workspace 1 (Code) -->
-    <keybind key="Super_L-1">
+    <keybind key="W-1">
       <action name="GoToDesktop" to="1"/>
     </keybind>
 
     <!-- Switch to workspace 2 (Amiga) -->
-    <keybind key="Super_L-2">
+    <keybind key="W-2">
       <action name="GoToDesktop" to="2"/>
     </keybind>
 
     <!-- Open terminal -->
-    <keybind key="Super_L-Return">
+    <keybind key="W-Return">
       <action name="Execute" command="foot"/>
     </keybind>
 
     <!-- Application launcher -->
-    <keybind key="Super_L-d">
+    <keybind key="W-d">
       <action name="Execute" command="fuzzel"/>
     </keybind>
 
@@ -45,15 +45,15 @@
     </keybind>
 
     <!-- Toggle fullscreen -->
-    <keybind key="Super_L-f">
+    <keybind key="W-f">
       <action name="ToggleFullscreen"/>
     </keybind>
 
     <!-- Move window to next workspace -->
-    <keybind key="Super_L-Shift_L-1">
+    <keybind key="W-S-1">
       <action name="SendToDesktop" to="1" follow="false"/>
     </keybind>
-    <keybind key="Super_L-Shift_L-2">
+    <keybind key="W-S-2">
       <action name="SendToDesktop" to="2" follow="false"/>
     </keybind>
   </keyboard>

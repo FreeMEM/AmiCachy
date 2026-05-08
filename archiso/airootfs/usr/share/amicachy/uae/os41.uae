@@ -23,6 +23,8 @@ gfx_api=sdl2
 sound_output=exact
 sound_channels=stereo
 sound_frequency=48000
+sound_volume=0
+sound_volume_paula=0
 
 ; Storage
 filesystem2=rw,DH0:System:/home/amiga/os41/system,0
@@ -31,3 +33,6 @@ filesystem2=rw,DH1:Work:/home/amiga/os41/work,0
 ; Input
 joyport0=mouse
 joyport1=joy1
+magic_mouse=true
+magic_mousecursor=native
+absolute_mouse=mousehack

@@ -9,7 +9,7 @@ AmiCachy is a high-performance, minimalist Amiga environment built on **CachyOS 
 * **Display Server:** Wayland (Native).
     * **Cage:** (Kiosk mode) for 68k/PPC emulation profiles.
     * **Labwc:** (Windowed) for the Development profile.
-* **Emulator:** Amiberry v7.1+ (Wayland/KMS support + QEMU PPC bridge).
+* **Emulator:** Amiberry v8.1+ (SDL3, Wayland/KMS support + QEMU PPC bridge).
 * **Bootloader:** `systemd-boot` with multi-profile support.
 
 ## 3. System Architecture & Boot Flow

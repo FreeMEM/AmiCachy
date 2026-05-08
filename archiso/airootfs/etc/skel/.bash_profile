@@ -8,6 +8,6 @@ if [[ "$(tty)" == "/dev/tty1" ]]; then
     # like ^[[[E on screen during the brief window between Plymouth
     # quit and cage taking over the framebuffer.
     stty -echo 2>/dev/null
-    printf '\033[?25l\033[2J\033[H' 2>/dev/null  # hide cursor + clear
+    printf '\033[?25l\033[2J\033[H\033[3J' 2>/dev/null  # hide cursor + clear
     exec /usr/bin/amilaunch.sh
 fi

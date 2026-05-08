@@ -314,10 +314,14 @@ class DiskCard(QFrame):
         self.device = disk["device"]
         self.model = disk.get("model", "Unknown drive")
         self.size = disk.get("size", 0)
+        self.is_partition = disk.get("is_partition", False)
         self._selected = False
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("diskCard")
         self.setFixedHeight(70)
+
+        if self.is_partition:
+            self.setStyleSheet("QFrame#diskCard { margin-left: 20px; background-color: #1a2a3a; }")
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
@@ -429,6 +433,7 @@ class DiskSelectPage(QWidget):
             if selected:
                 self.state.target_device_model = card.model
                 self.state.target_device_size = card.size
+                self.state.is_partition = card.is_partition
         self.disk_selected.emit(device)
 
 
@@ -727,13 +732,23 @@ class ConfirmPage(QWidget):
 
         size_gb = s.target_device_size / (1024 ** 3) if s.target_device_size else 0
 
+        if s.is_partition:
+            partition_info = (
+                f"  \u2022 Root: {s.target_device} (ext4, will be WIPED)\n"
+                f"  \u2022 EFI: Automatic (shared on same disk)\n"
+                f"  \u2022 Amiga Data: Internal (directory on root)\n\n"
+            )
+        else:
+            partition_info = (
+                f"  \u2022 EFI: 512 MB (FAT32)\n"
+                f"  \u2022 System: ~60% of disk (ext4, label: AMICACHY)\n"
+                f"  \u2022 Amiga Data: ~40% of disk (ext4)\n\n"
+            )
+
         text = (
-            f"<b>Target drive:</b> {s.target_device}"
+            f"<b>Target {'partition' if s.is_partition else 'drive'}:</b> {s.target_device}"
             f" ({s.target_device_model}, {size_gb:.1f} GB)\n\n"
-            f"<b>Partitions:</b>\n"
-            f"  \u2022 EFI: 512 MB (FAT32)\n"
-            f"  \u2022 System: ~60% of disk (ext4, label: AMICACHY)\n"
-            f"  \u2022 Amiga Data: ~40% of disk (ext4)\n\n"
+            f"<b>Storage Layout:</b>\n{partition_info}"
             f"<b>Boot modes:</b>\n{profiles_text}\n"
             f"<b>Add-ons:</b>\n{addons_text}\n"
             f"<b>Hardware:</b> {cpu_model} ({arch})"
