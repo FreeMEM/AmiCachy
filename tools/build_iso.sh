@@ -14,10 +14,16 @@ OUT_DIR="${PROJECT_DIR}/out"
 CACHYOS_KEY="882DCFE48E2051D48E2562ABF3B607488DB35A47"
 
 usage() {
-    echo "Usage: $(basename "$0") [--clean]"
+    echo "Usage: $(basename "$0") [--clean] [--seed-assets DIR]"
     echo ""
     echo "Options:"
-    echo "  --clean    Remove work/ directory before building"
+    echo "  --clean              Remove work/ directory before building"
+    echo "  --seed-assets DIR    Pre-load Amiga ROMs/HDFs from DIR into the ISO."
+    echo "                       DIR must contain kickstarts/ and/or harddrives/"
+    echo "                       subdirs. The contents become available to Amiberry"
+    echo "                       on first boot via /usr/share/amiberry/{roms,harddrives}/."
+    echo "                       Omit this flag to build a clean public ISO with no"
+    echo "                       proprietary assets."
     echo ""
     echo "Bundles installer data (tools/installer/, hardware_audit.py,"
     echo "packages.x86_64, pacman.conf) into airootfs before calling mkarchiso,"
@@ -94,6 +100,60 @@ unbundle_installer_data() {
     rm -f  "${AIROOTFS}/usr/share/amicachy/installer/pacman.conf"
 }
 
+bundle_seed_assets() {
+    # Stage Amiga ROMs and HDFs from a host directory into the airootfs so the
+    # built ISO ships with them preloaded. Maps:
+    #   $SEED_ASSETS/kickstarts/  ->  /usr/share/amicachy/seed-assets/roms/
+    #   $SEED_ASSETS/harddrives/  ->  /usr/share/amicachy/seed-assets/harddrives/
+    # On first boot, amicachy-seed-assets.service symlinks these into
+    # /usr/share/amiberry/{roms,harddrives}/ so Amiberry sees them.
+    [[ -z "${SEED_ASSETS:-}" ]] && return 0
+
+    if [[ ! -d "$SEED_ASSETS" ]]; then
+        echo "ERROR: --seed-assets path does not exist: $SEED_ASSETS" >&2
+        exit 1
+    fi
+
+    echo ":: Bundling seed assets from $SEED_ASSETS..."
+
+    local AIROOTFS="${PROFILE_DIR}/airootfs"
+    local SEED_DIR="${AIROOTFS}/usr/share/amicachy/seed-assets"
+    local copied=0
+
+    if [[ -d "$SEED_ASSETS/kickstarts" ]]; then
+        mkdir -p "${SEED_DIR}/roms"
+        cp -a "$SEED_ASSETS/kickstarts/." "${SEED_DIR}/roms/"
+        local n
+        n="$(find "$SEED_ASSETS/kickstarts" -maxdepth 1 -type f | wc -l)"
+        echo "   -> kickstarts/ ($n file(s)) -> seed-assets/roms/"
+        copied=$((copied + n))
+    fi
+
+    if [[ -d "$SEED_ASSETS/harddrives" ]]; then
+        mkdir -p "${SEED_DIR}/harddrives"
+        cp -a "$SEED_ASSETS/harddrives/." "${SEED_DIR}/harddrives/"
+        local n
+        n="$(find "$SEED_ASSETS/harddrives" -maxdepth 1 -type f | wc -l)"
+        echo "   -> harddrives/ ($n file(s)) -> seed-assets/harddrives/"
+        copied=$((copied + n))
+    fi
+
+    if [[ $copied -eq 0 ]]; then
+        echo "   WARN: $SEED_ASSETS contains neither kickstarts/ nor harddrives/"
+    else
+        local sz
+        sz="$(du -sh "$SEED_DIR" 2>/dev/null | cut -f1)"
+        echo "   Total bundled: $sz"
+    fi
+    HAS_SEED_ASSETS=1
+}
+
+unbundle_seed_assets() {
+    [[ "${HAS_SEED_ASSETS:-0}" -eq 1 ]] || return 0
+    echo ":: Cleaning seed assets from profile tree..."
+    rm -rf "${PROFILE_DIR}/airootfs/usr/share/amicachy/seed-assets"
+}
+
 setup_local_packages() {
     # If amiberry (or other custom packages) have been compiled and are in out/,
     # create a local pacman repo so mkarchiso can install them into the ISO.
@@ -162,11 +222,17 @@ build_iso() {
 # --- Main ---
 
 CLEAN=0
-for arg in "$@"; do
-    case "$arg" in
-        --clean) CLEAN=1 ;;
+SEED_ASSETS=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --clean) CLEAN=1; shift ;;
+        --seed-assets)
+            [[ $# -ge 2 ]] || { echo "ERROR: --seed-assets requires a path"; usage; }
+            SEED_ASSETS="$2"; shift 2 ;;
+        --seed-assets=*)
+            SEED_ASSETS="${1#*=}"; shift ;;
         -h|--help) usage ;;
-        *) echo "Unknown option: $arg"; usage ;;
+        *) echo "Unknown option: $1"; usage ;;
     esac
 done
 
@@ -176,5 +242,6 @@ import_cachyos_keys
 prepare_dirs
 setup_local_packages
 bundle_installer_data
-trap 'unbundle_installer_data; cleanup_local_packages' EXIT
+bundle_seed_assets
+trap 'unbundle_installer_data; cleanup_local_packages; unbundle_seed_assets' EXIT
 build_iso

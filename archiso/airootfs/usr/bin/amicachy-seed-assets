@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Symlink ROMs/HDFs preloaded into the ISO via build_iso.sh --seed-assets
+# into the locations Amiberry expects:
+#   /usr/share/amicachy/seed-assets/roms/*       -> /usr/share/amiberry/roms/
+#   /usr/share/amicachy/seed-assets/harddrives/* -> /usr/share/amiberry/harddrives/
+# Idempotent via /var/lib/amicachy/seed-assets.done.
+
+set -uo pipefail
+
+SEED_DIR="/usr/share/amicachy/seed-assets"
+AMIBERRY_DIR="/usr/share/amiberry"
+STATE_DIR="/var/lib/amicachy"
+DONE_FLAG="${STATE_DIR}/seed-assets.done"
+
+[[ -d "$SEED_DIR" ]] || { echo "no seed-assets dir; nothing to do"; exit 0; }
+
+mkdir -p "$STATE_DIR" "$AMIBERRY_DIR/roms" "$AMIBERRY_DIR/harddrives"
+
+link_dir() {
+    local src_dir="$1"
+    local dst_dir="$2"
+    [[ -d "$src_dir" ]] || return 0
+    local f base
+    while IFS= read -r -d '' f; do
+        base="$(basename "$f")"
+        if [[ -e "$dst_dir/$base" && ! -L "$dst_dir/$base" ]]; then
+            echo "skip $base (real file already in $dst_dir)"
+            continue
+        fi
+        ln -sfn "$f" "$dst_dir/$base"
+        echo "linked $base"
+    done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type f -print0)
+}
+
+link_dir "$SEED_DIR/roms"       "$AMIBERRY_DIR/roms"
+link_dir "$SEED_DIR/harddrives" "$AMIBERRY_DIR/harddrives"
+
+date -u +%FT%TZ > "$DONE_FLAG"

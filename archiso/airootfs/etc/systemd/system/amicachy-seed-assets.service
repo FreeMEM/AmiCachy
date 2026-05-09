@@ -1,0 +1,14 @@
+[Unit]
+Description=AmiCachy: expose preloaded ROMs/HDFs to Amiberry (one-shot)
+DefaultDependencies=yes
+After=local-fs.target
+ConditionPathExists=/usr/share/amicachy/seed-assets
+ConditionPathExists=!/var/lib/amicachy/seed-assets.done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-seed-assets
+
+[Install]
+WantedBy=multi-user.target

@@ -169,6 +169,8 @@ sync_files() {
                     "$MNT/usr/bin/amicachy-installer" \
                     "$MNT/usr/bin/amicachy-earlystartup" \
                     "$MNT/usr/bin/amicachy-fetch-asset" \
+                    "$MNT/usr/bin/amicachy-link-host-assets" \
+                    "$MNT/usr/bin/amicachy-seed-assets" \
                     "$MNT/usr/bin/start_dev_env.sh" 2>/dev/null || true
 
     # 5. Fix ownership: rsync -a preserves host uid which maps to amiga (1000)
@@ -533,6 +535,72 @@ cmd_boot() {
         DISPLAY_ARGS="-display gtk,gl=on"
     fi
 
+    # virtiofs share for host-side ROMs/HDFs (read-only by default).
+    # Mirrors the guest's /run/host-amiga to ASSET_DIR on the host.
+    # Only enabled when both ASSET_DIR and a virtiofsd binary are present;
+    # otherwise the VM boots normally with no shared assets.
+    local ASSET_DIR="${ASSET_DIR:-$HOME/Amiberry}"
+    local VIRTIOFSD_BIN=""
+    local VIRTIOFS_SOCK="${DEV_DIR}/virtiofs-assets.sock"
+    local VIRTIOFS_PID=""
+    local VIRTIOFS_QEMU_ARGS=()
+    local MEM_BACKEND_ARGS=()
+    local RW_LABEL="rw"
+    for cand in /usr/lib/virtiofsd /usr/libexec/virtiofsd /usr/lib/qemu/virtiofsd "$(command -v virtiofsd 2>/dev/null)"; do
+        [[ -n "$cand" && -x "$cand" ]] && { VIRTIOFSD_BIN="$cand"; break; }
+    done
+    if [[ -d "$ASSET_DIR" && -n "$VIRTIOFSD_BIN" ]]; then
+        # RW by default (opt-in to read-only via ASSET_RO=1).
+        local RW_FLAG=""
+        if [[ "${ASSET_RO:-0}" == "1" ]]; then
+            RW_FLAG="--readonly"
+            RW_LABEL="ro"
+        fi
+        # Reap any orphan virtiofsd that might still hold the pidfile lock
+        # (e.g. a prior boot whose QEMU crashed before our trap fired).
+        if [[ -f "${VIRTIOFS_SOCK}.pid" ]]; then
+            local _stale_pid
+            _stale_pid="$(cat "${VIRTIOFS_SOCK}.pid" 2>/dev/null || true)"
+            [[ -n "$_stale_pid" ]] && kill "$_stale_pid" 2>/dev/null || true
+        fi
+        pkill -f "virtiofsd .* --socket-path=${VIRTIOFS_SOCK}" 2>/dev/null || true
+        rm -f "$VIRTIOFS_SOCK" "${VIRTIOFS_SOCK}.pid"
+        echo ":: Starting virtiofsd ($RW_LABEL): $ASSET_DIR -> guest tag 'amicachy-assets'"
+        "$VIRTIOFSD_BIN" \
+            --socket-path="$VIRTIOFS_SOCK" \
+            --shared-dir="$ASSET_DIR" \
+            --sandbox=none \
+            $RW_FLAG \
+            >"${DEV_DIR}/virtiofsd.log" 2>&1 &
+        VIRTIOFS_PID=$!
+        # Wait for socket. Use pre-increment so the arithmetic command never
+        # returns a non-zero status (post-increment from 0 would trip set -e).
+        local _vtries=0
+        while [[ ! -S "$VIRTIOFS_SOCK" && $_vtries -lt 40 ]]; do
+            sleep 0.1
+            ((++_vtries))
+        done
+        if [[ -S "$VIRTIOFS_SOCK" ]]; then
+            MEM_BACKEND_ARGS=(
+                -object "memory-backend-memfd,id=mem,size=${RAM}M,share=on"
+                -numa "node,memdev=mem"
+            )
+            VIRTIOFS_QEMU_ARGS=(
+                -chardev "socket,id=char-assets,path=${VIRTIOFS_SOCK}"
+                -device "vhost-user-fs-pci,queue-size=1024,chardev=char-assets,tag=amicachy-assets"
+            )
+        else
+            echo "   WARN: virtiofsd socket did not appear; booting WITHOUT host share."
+            echo "   See ${DEV_DIR}/virtiofsd.log for details."
+            kill "$VIRTIOFS_PID" 2>/dev/null || true
+            VIRTIOFS_PID=""
+        fi
+    elif [[ ! -d "$ASSET_DIR" ]]; then
+        echo ":: ASSET_DIR='$ASSET_DIR' not found — booting WITHOUT host share."
+    elif [[ -z "$VIRTIOFSD_BIN" ]]; then
+        echo ":: virtiofsd not installed — booting WITHOUT host share. (pacman -S virtiofsd)"
+    fi
+
     # Serial logs:
     #   ttyS0 -> boot.log:    firmware / early-boot output. Mostly empty
     #                         because we do NOT pass console=ttyS0 (Plymouth
@@ -550,6 +618,7 @@ cmd_boot() {
     echo "   Journal: $JOURNAL_LOG  (ttyS1 — systemd journal)"
     echo "   Serial:  $BOOT_LOG     (ttyS0 — firmware/early boot)"
     echo "   SSH:     ssh -p 2222 amiga@localhost (password: amiga)"
+    [[ -n "$VIRTIOFS_PID" ]] && echo "   Assets:  $ASSET_DIR ($RW_LABEL via virtiofs, mounted as /run/host-amiga)"
     echo ""
     echo "   Tip: In another terminal, run: $0 log              # journal"
     echo "        $0 log --serial    # raw ttyS0"
@@ -590,12 +659,14 @@ except Exception as e:
         -cpu host \
         -m "$RAM" \
         -smp "$CPUS" \
+        "${MEM_BACKEND_ARGS[@]}" \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive file="$DISK",format=qcow2,if=virtio,cache=writethrough \
+        -drive file="$DISK",format=qcow2,if=none,id=hd0,cache=writethrough \
+        -device virtio-blk-pci,drive=hd0,bootindex=1 \
         -device "$VGA_DEVICE" \
         $DISPLAY_ARGS \
-        -device virtio-net-pci,netdev=net0 \
+        -device virtio-net-pci,netdev=net0,bootindex=99 \
         -netdev user,id=net0,hostfwd=tcp::2222-:22 \
         "${AUDIO_ARGS[@]}" \
         -device ich9-intel-hda \
@@ -604,6 +675,7 @@ except Exception as e:
         -serial file:"$JOURNAL_LOG" \
         -usb \
         -device usb-tablet \
+        "${VIRTIOFS_QEMU_ARGS[@]}" \
         -qmp unix:"$QMP_SOCK",server,nowait &
 
     local QEMU_PID=$!
@@ -636,6 +708,13 @@ except Exception as e:
         wait "$QEMU_PID" 2>/dev/null
     done
     rm -f "$QMP_SOCK"
+
+    # Tear down virtiofsd if we started it.
+    if [[ -n "$VIRTIOFS_PID" ]]; then
+        kill "$VIRTIOFS_PID" 2>/dev/null || true
+        wait "$VIRTIOFS_PID" 2>/dev/null || true
+        rm -f "$VIRTIOFS_SOCK" "${VIRTIOFS_SOCK}.pid"
+    fi
     trap - INT TERM
 }
 

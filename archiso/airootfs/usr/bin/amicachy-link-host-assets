@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Mount the virtiofs share (tag: amicachy-assets) at /run/host-amiga and
+# expose host ROMs/HDFs to Amiberry via symlinks under /usr/share/amiberry/.
+# Best-effort: exits 0 silently if the share is not present (so non-dev
+# boots are not blocked by this unit).
+
+set -uo pipefail
+
+TAG="amicachy-assets"
+MOUNT_POINT="/run/host-amiga"
+# Amiberry has two roots: a system-wide one configured in the .uae presets and
+# a per-user one it auto-creates the first time the GUI runs. We populate both
+# so kickstarts and HDFs show up regardless of how Amiberry was launched.
+AMIBERRY_DIRS=("/usr/share/amiberry" "/home/amiga/Amiberry")
+
+modinfo virtiofs >/dev/null 2>&1 || { echo "virtiofs module unavailable; nothing to do"; exit 0; }
+modprobe virtiofs 2>/dev/null || true
+
+mkdir -p "$MOUNT_POINT"
+if ! mountpoint -q "$MOUNT_POINT"; then
+    if ! mount -t virtiofs "$TAG" "$MOUNT_POINT" 2>/dev/null; then
+        echo "no virtiofs device with tag '$TAG'; nothing to do"
+        exit 0
+    fi
+fi
+
+echo "host share mounted at $MOUNT_POINT"
+
+# Drop stale symlinks that point into the host share (basura from previous
+# runs whose source is no longer there or no longer matches our extension
+# whitelist). We touch only links whose target lives under the share, so
+# user-created symlinks elsewhere are left alone.
+sweep_host_links() {
+    local dst_dir="$1"
+    [[ -d "$dst_dir" ]] || return 0
+    find "$dst_dir" -maxdepth 1 -type l -lname "${MOUNT_POINT}/*" -delete 2>/dev/null || true
+}
+
+# Symlink files matching one of the given extensions (case-insensitive).
+# Empty real files (e.g. zero-byte AROS placeholders Amiberry creates on first
+# run) are treated as missing and replaced with the host symlink.
+link_dir() {
+    local src_dir="$1"
+    local dst_dir="$2"
+    shift 2
+    local exts=("$@")
+    [[ -d "$src_dir" ]] || return 0
+    local find_expr=()
+    local i=0
+    for ext in "${exts[@]}"; do
+        [[ $i -gt 0 ]] && find_expr+=(-o)
+        find_expr+=(-iname "*.$ext")
+        ((++i))
+    done
+    local f base
+    while IFS= read -r -d '' f; do
+        base="$(basename "$f")"
+        if [[ -e "$dst_dir/$base" && ! -L "$dst_dir/$base" && -s "$dst_dir/$base" ]]; then
+            echo "skip $base (real non-empty file already in $dst_dir)"
+            continue
+        fi
+        ln -sfn "$f" "$dst_dir/$base"
+        echo "linked $base -> $dst_dir"
+    done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type f \( "${find_expr[@]}" \) -print0)
+}
+
+for dir in "${AMIBERRY_DIRS[@]}"; do
+    [[ -d "$dir" || "$dir" == "/usr/share/amiberry" ]] || continue
+    mkdir -p "$dir/roms" "$dir/harddrives"
+    sweep_host_links "$dir/roms"
+    sweep_host_links "$dir/harddrives"
+    link_dir "$MOUNT_POINT/kickstarts" "$dir/roms"       rom key bin
+    link_dir "$MOUNT_POINT/harddrives" "$dir/harddrives" hdf hdz img iso
+done

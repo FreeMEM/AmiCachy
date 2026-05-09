@@ -1,0 +1,12 @@
+[Unit]
+Description=AmiCachy: mount host ROMs/HDFs via virtiofs (dev mode)
+DefaultDependencies=yes
+After=local-fs.target systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-link-host-assets
+
+[Install]
+WantedBy=multi-user.target
