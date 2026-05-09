@@ -12,6 +12,7 @@ from .backend import (
     InstallError,
     NetworkError,
     configure_system,
+    copy_rom_payload,
     emergency_cleanup,
     final_cleanup,
     generate_fstab,
@@ -94,7 +95,70 @@ class DiskScanWorker(QThread):
 
     finished = Signal(list)
 
+    @staticmethod
+    def _find_live_devices() -> set[str]:
+        """Identify devices backing the live ISO so they are not install targets.
+
+        Checks both the rootfs source (/) and /run/archiso/bootmnt; on archiso
+        the latter is the actual USB block device while / is an overlay/loop.
+        Symlinks are resolved and the parent disk name is added too so a USB
+        with multiple partitions is fully excluded.
+        """
+        live_devices: set[str] = set()
+
+        for mountpoint in ("/run/archiso/bootmnt", "/"):
+            try:
+                findmnt = subprocess.run(
+                    ["findmnt", "-n", "-o", "SOURCE", mountpoint],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                live_source = findmnt.stdout.strip()
+                if not live_source:
+                    continue
+
+                resolved = subprocess.run(
+                    ["readlink", "-f", live_source],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                ).stdout.strip() or live_source
+
+                if not resolved.startswith("/dev/"):
+                    continue
+
+                name = resolved.rsplit("/", 1)[-1]
+                live_devices.add(name)
+
+                # Add parent disk too (e.g. /dev/sda1 -> sda)
+                try:
+                    pkname = subprocess.run(
+                        ["lsblk", "-no", "PKNAME", resolved],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    ).stdout.strip()
+                    if pkname:
+                        live_devices.add(pkname)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    m = re.match(r"/dev/(nvme\d+n\d+|mmcblk\d+|[a-z]+)", resolved)
+                    if m:
+                        live_devices.add(m.group(1))
+            except (subprocess.SubprocessError, FileNotFoundError):
+                continue
+
+        return live_devices
+
     def run(self):
+        # Trigger kernel partition re-read before scanning — essential on
+        # MacBooks where Apple NVMe SSDs may not appear in lsblk until the
+        # kernel has probed them.
+        try:
+            subprocess.run(["partprobe"], capture_output=True, timeout=10)
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
         disks: list[dict] = []
         try:
             result = subprocess.run(
@@ -109,23 +173,7 @@ class DiskScanWorker(QThread):
             )
             data = json.loads(result.stdout)
 
-            # Find the device backing the live USB (mounted at /)
-            live_device = ""
-            try:
-                findmnt = subprocess.run(
-                    ["findmnt", "-n", "-o", "SOURCE", "/"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                live_source = findmnt.stdout.strip()
-                # Strip partition suffix to get parent device
-                # /dev/sda1 -> sda, /dev/nvme0n1p1 -> nvme0n1
-                match = re.match(r"/dev/(\w+?)(?:p?\d+)?$", live_source)
-                if match:
-                    live_device = match.group(1)
-            except (subprocess.CalledProcessError, ValueError):
-                pass
+            live_devices = self._find_live_devices()
 
             for dev in data.get("blockdevices", []):
                 if dev.get("type") != "disk":
@@ -135,7 +183,7 @@ class DiskScanWorker(QThread):
                 if dev.get("rm", False):
                     continue
                 name = dev.get("name", "")
-                if name == live_device:
+                if name in live_devices:
                     continue
                 size = int(dev.get("size", 0))
                 if size < 20 * 1024 * 1024 * 1024:  # 20 GiB minimum
@@ -226,6 +274,16 @@ class InstallWorker(QThread):
         self.step_changed.emit("Configuring system...", 74)
         configure_system(runner)
         self.step_changed.emit("System configured.", 85)
+
+        # Step 6b: Copy any user-supplied ROMs/Kickstarts found on the live
+        # media (USB root, /run/media/amiga). Best-effort: missing ROMs are
+        # not an installation failure — the Asset Manager can fetch them
+        # on first boot.
+        self.step_changed.emit("Copying ROM files (if present)...", 86)
+        try:
+            copy_rom_payload(runner)
+        except Exception as e:
+            self.log_line.emit(f"WARNING: ROM payload copy failed: {e}")
 
         # Step 7: Install bootloader
         self.step_changed.emit("Installing boot manager...", 87)

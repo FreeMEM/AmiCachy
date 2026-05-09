@@ -6,6 +6,7 @@ for consistent logging and error handling.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -21,6 +22,17 @@ from .resources import (
     LOADER_CONF_TEMPLATE,
     MOUNTPOINT,
 )
+
+
+ROM_SUFFIXES = {".rom", ".key", ".bin"}
+BOOT_MEDIA_SKIP_DIRS = {
+    "arch",
+    "boot",
+    "efi",
+    "loader",
+    "[boot]",
+    "system volume information",
+}
 
 
 class InstallError(Exception):
@@ -105,12 +117,167 @@ def _write_file(path: str, content: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Robustness helpers: target release, signature wipe, ext4 format, partition
+# recreate. Used to make the install flow resilient against udisks/udiskie
+# auto-mounts, stale signatures and locked block devices.
+# ---------------------------------------------------------------------------
+
+
+def _device_children(device: str) -> list[str]:
+    """Return child partitions for a disk device."""
+    try:
+        result = subprocess.run(
+            ["lsblk", "-nr", "-o", "PATH", device],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return []
+
+    devices = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [path for path in devices if path != device]
+
+
+def _unmount_device(runner: CommandRunner, device: str) -> None:
+    """Unmount anything mounted from a block device."""
+    runner.run(["timeout", "3", "udisksctl", "unmount", "-b", device], check=False)
+    runner.run(["umount", "-l", device], check=False)
+
+    mountpoints: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["findmnt", "-nr", "-o", "TARGET", "--source", device],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        result = None
+
+    if result:
+        mountpoints.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+    try:
+        result = subprocess.run(
+            ["lsblk", "-nr", "-o", "MOUNTPOINTS", device],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        mountpoints.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+    for mountpoint in sorted(mountpoints, key=len, reverse=True):
+        runner.run(["umount", "-R", "-l", mountpoint], check=False)
+        runner.run(["umount", "-l", mountpoint], check=False)
+
+
+def release_install_target(runner: CommandRunner, device: str, include_children: bool = False) -> None:
+    """Stop automounters and release the selected install target."""
+    runner.run(["pkill", "-x", "udiskie"], check=False)
+    runner.run(["pkill", "-f", "dbus-run-session.*udiskie"], check=False)
+    runner.run(["swapoff", device], check=False)
+
+    targets = [device]
+    if include_children:
+        targets.extend(_device_children(device))
+
+    for target in sorted(set(targets), key=len, reverse=True):
+        _unmount_device(runner, target)
+        runner.run(["swapoff", target], check=False)
+        runner.run(["blockdev", "--flushbufs", target], check=False)
+
+
+def clear_filesystem_signatures(runner: CommandRunner, device: str) -> None:
+    """Best-effort wipefs with diagnostics; formatting can still proceed."""
+    runner.run(["lsblk", "-f", device], check=False)
+    result = runner.run(["wipefs", "--all", "--force", device], check=False)
+    if result.returncode != 0:
+        runner.run(["fuser", "-vm", device], check=False)
+        runner.run(["umount", "-l", device], check=False)
+        runner.run(["blockdev", "--flushbufs", device], check=False)
+        result = runner.run(["wipefs", "--all", "--force", device], check=False)
+    if result.returncode != 0:
+        runner.run(
+            ["bash", "-c", f"echo 'WARNING: wipefs failed on {device}; continuing with forced mkfs.'"],
+            check=False,
+        )
+
+
+def format_ext4(runner: CommandRunner, device: str, label: str) -> None:
+    """Create an ext4 filesystem, aggressively releasing stale holders first."""
+    release_install_target(runner, device)
+    result = runner.run(["mkfs.ext4", "-F", "-L", label, device], check=False)
+    if result.returncode == 0:
+        return
+
+    runner.run(["lsblk", "-f", device], check=False)
+    runner.run(["findmnt", "-R", device], check=False)
+    runner.run(["fuser", "-vm", device], check=False)
+    release_install_target(runner, device)
+    runner.run(["mkfs.ext4", "-F", "-F", "-L", label, device])
+
+
+def recreate_partition(runner: CommandRunner, disk: str, partition: str) -> str:
+    """Delete and recreate a selected partition in the same sector range."""
+    part_name = Path(partition).name
+    match = re.search(r"(?:p)?(\d+)$", part_name)
+    if not match:
+        raise InstallError(f"Could not determine partition number for {partition}")
+
+    part_num = match.group(1)
+    start_path = Path(f"/sys/class/block/{part_name}/start")
+    size_path = Path(f"/sys/class/block/{part_name}/size")
+    if not start_path.exists() or not size_path.exists():
+        raise InstallError(f"Could not read sector range for {partition}")
+
+    start = start_path.read_text().strip()
+    size = size_path.read_text().strip()
+    end = str(int(start) + int(size) - 1)
+
+    if not start or not end:
+        raise InstallError(f"Could not find partition {part_num} on {disk}")
+
+    runner.run(
+        ["bash", "-c", f"echo 'Recreating {partition} in-place: {start}s-{end}s'"],
+        check=False,
+    )
+    release_install_target(runner, partition)
+    result = runner.run([
+        "sgdisk",
+        f"--delete={part_num}",
+        f"--new={part_num}:{start}:{end}",
+        f"--change-name={part_num}:AMICACHY",
+        f"--typecode={part_num}:8300",
+        disk,
+    ], check=False)
+    if result.returncode != 0:
+        runner.run(["parted", "-s", disk, "rm", part_num])
+        runner.run(["partprobe", disk], check=False)
+        time.sleep(1)
+        runner.run([
+            "parted", "-s", disk, "unit", "s", "mkpart",
+            "AMICACHY", "ext4", f"{start}s", f"{end}s",
+        ])
+    runner.run(["partprobe", disk], check=False)
+    runner.run(["udevadm", "settle"], check=False)
+    time.sleep(1)
+    return partition
+
+
+# ---------------------------------------------------------------------------
 # Installation steps
 # ---------------------------------------------------------------------------
 
 
 def partition_disk(runner: CommandRunner, device: str) -> dict[str, str]:
     """Create GPT partition table with EFI, Root, and Data partitions."""
+    # Release any holders (udisks auto-mounts, stale swap, leftover children)
+    # before we overwrite the partition table.
+    release_install_target(runner, device, include_children=True)
     runner.run(["wipefs", "--all", "--force", device])
     runner.run(["parted", "-s", device, "mklabel", "gpt"])
 
@@ -140,18 +307,23 @@ def partition_disk(runner: CommandRunner, device: str) -> dict[str, str]:
 
     # Wait for kernel to register new partitions
     runner.run(["partprobe", device])
+    runner.run(["udevadm", "settle"], check=False)
     time.sleep(1)
 
-    # Format
+    # Format. ext4 partitions go through format_ext4(), which retries after
+    # releasing stale holders if mkfs.ext4 fails the first time.
     runner.run(["mkfs.fat", "-F", "32", "-n", "AMIEFI", partitions["efi"]])
-    runner.run(["mkfs.ext4", "-F", "-L", "AMICACHY", partitions["root"]])
-    runner.run(["mkfs.ext4", "-F", "-L", "AMIGADATA", partitions["data"]])
+    format_ext4(runner, partitions["root"], "AMICACHY")
+    format_ext4(runner, partitions["data"], "AMIGADATA")
 
     return partitions
 
 
 def mount_filesystems(runner: CommandRunner, partitions: dict[str, str]) -> None:
     """Mount root, EFI, and data partitions under MOUNTPOINT."""
+    runner.run(["mkdir", "-p", MOUNTPOINT])
+    # Defensive: if a previous attempt left mounts behind, clean them up.
+    runner.run(["umount", "-R", MOUNTPOINT], check=False)
     runner.run(["mount", partitions["root"], MOUNTPOINT])
     runner.run(["mkdir", "-p", f"{MOUNTPOINT}/boot"])
     runner.run(["mount", partitions["efi"], f"{MOUNTPOINT}/boot"])
@@ -339,20 +511,80 @@ def configure_system(runner: CommandRunner) -> None:
         "MODULES=()\nBINARIES=()\nFILES=()\n"
         "HOOKS=(base udev plymouth autodetect modconf kms block filesystems keyboard)\n",
     )
-    # Plymouth systemd services
+    # Plymouth systemd services. We deliberately skip the
+    # plymouth-quit-wait.service symlink (and remove it if a previous
+    # install left it behind): we do NOT want multi-user.target to block
+    # on plymouth-quit-wait, only on plymouth-quit. Masking either of the
+    # two is forbidden — see feedback_plymouth_mask.md — but skipping the
+    # *-wait* dependency is safe and matches our amilaunch sequence.
     for wants_dir, service in [
         ("sysinit.target.wants", "plymouth-start.service"),
         ("multi-user.target.wants", "plymouth-quit.service"),
-        ("multi-user.target.wants", "plymouth-quit-wait.service"),
     ]:
         link_dir = f"{mnt}/etc/systemd/system/{wants_dir}"
         Path(link_dir).mkdir(parents=True, exist_ok=True)
         link_path = Path(f"{link_dir}/{service}")
         if not link_path.exists():
             link_path.symlink_to(f"/usr/lib/systemd/system/{service}")
+    wait_link = Path(
+        f"{mnt}/etc/systemd/system/multi-user.target.wants/plymouth-quit-wait.service"
+    )
+    if wait_link.exists() or wait_link.is_symlink():
+        wait_link.unlink()
 
     # Regenerate initramfs (with plymouth hook now active)
     runner.run_chroot(["mkinitcpio", "-P"])
+
+
+def _iter_rom_files(source: Path):
+    for root, dirs, files in os.walk(source):
+        dirs[:] = [
+            directory for directory in dirs
+            if directory.lower() not in BOOT_MEDIA_SKIP_DIRS
+            and not directory.startswith(".")
+        ]
+        for name in files:
+            path = Path(root) / name
+            if path.suffix.lower() in ROM_SUFFIXES:
+                yield path
+
+
+def copy_rom_payload(runner: CommandRunner) -> None:
+    """Copy user-provided ROM/Kickstart files from live media to the install."""
+    destination = Path(f"{MOUNTPOINT}/home/amiga/kickstarts")
+    destination.mkdir(parents=True, exist_ok=True)
+
+    sources = [
+        Path("/run/archiso/bootmnt"),
+        Path("/run/media/amiga"),
+    ]
+
+    copied = 0
+    seen: set[Path] = set()
+
+    for source in sources:
+        if not source.exists():
+            continue
+        for rom in _iter_rom_files(source):
+            try:
+                resolved = rom.resolve()
+            except OSError:
+                resolved = rom
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+
+            dest = destination / rom.name
+            shutil.copy2(rom, dest)
+            copied += 1
+            runner.log(f"Copied ROM payload: {rom} -> {dest}")
+
+    if copied:
+        runner.run_chroot(
+            ["chown", "-R", "amiga:amiga", "/home/amiga/kickstarts"], check=False
+        )
+    else:
+        runner.log("No ROM payload files found on live media.")
 
 
 def install_bootloader(
@@ -364,6 +596,10 @@ def install_bootloader(
     mnt = MOUNTPOINT
 
     runner.run_chroot(["bootctl", "install"])
+    try:
+        install_mac_fallback_bootloader(runner)
+    except InstallError as exc:
+        runner.log(f"WARN: Mac fallback bootloader skipped: {exc}")
 
     # loader.conf
     default_entry = BOOT_ENTRIES[default_profile]["filename"]
@@ -414,6 +650,26 @@ def install_addon(runner: CommandRunner, asset_id: str) -> None:
     ])
 
 
+def install_mac_fallback_bootloader(runner: CommandRunner) -> None:
+    """Install the removable/fallback EFI path used by Apple's boot picker."""
+    fallback_dir = Path(f"{MOUNTPOINT}/boot/EFI/BOOT")
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+
+    candidates = [
+        Path(f"{MOUNTPOINT}/boot/EFI/systemd/systemd-bootx64.efi"),
+        Path(f"{MOUNTPOINT}/usr/lib/systemd/boot/efi/systemd-bootx64.efi"),
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            shutil.copy2(candidate, fallback_dir / "BOOTX64.EFI")
+            return
+
+    raise InstallError(
+        "Could not find systemd-bootx64.efi to install the Mac EFI fallback."
+    )
+
+
 def final_cleanup(runner: CommandRunner) -> None:
     """Sync and unmount all filesystems."""
     runner.run(["sync"])
@@ -434,4 +690,4 @@ def emergency_cleanup(runner: CommandRunner) -> None:
         f"{MOUNTPOINT}/boot",
         MOUNTPOINT,
     ]:
-        runner.run(["umount", path], check=False)
+        runner.run(["umount", "-l", path], check=False)
