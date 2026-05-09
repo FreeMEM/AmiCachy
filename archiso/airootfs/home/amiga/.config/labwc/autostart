@@ -6,3 +6,6 @@
 
 # Notification daemon
 mako &
+
+# Automount USB drives
+udiskie &

@@ -87,6 +87,11 @@ sudo
 openssh
 terminus-font
 
+# Disk automount (USB drives, internal SSDs)
+udisks2
+udiskie
+polkit
+
 # Boot splash
 plymouth
 
