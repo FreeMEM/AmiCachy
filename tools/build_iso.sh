@@ -14,7 +14,7 @@ OUT_DIR="${PROJECT_DIR}/out"
 CACHYOS_KEY="882DCFE48E2051D48E2562ABF3B607488DB35A47"
 
 usage() {
-    echo "Usage: $(basename "$0") [--clean] [--seed-assets DIR]"
+    echo "Usage: $(basename "$0") [--clean] [--seed-assets DIR] [--squashfs-comp xz|zstd]"
     echo ""
     echo "Options:"
     echo "  --clean              Remove work/ directory before building"
@@ -24,6 +24,9 @@ usage() {
     echo "                       on first boot via /usr/share/amiberry/{roms,harddrives}/."
     echo "                       Omit this flag to build a clean public ISO with no"
     echo "                       proprietary assets."
+    echo "  --squashfs-comp C    Squashfs compression: 'xz' (default, smallest, slow)"
+    echo "                       or 'zstd' (recommended for --seed-assets ISOs:"
+    echo "                       ~5x faster, ISO 5-10% larger)."
     echo ""
     echo "Bundles installer data (tools/installer/, hardware_audit.py,"
     echo "packages.x86_64, pacman.conf) into airootfs before calling mkarchiso,"
@@ -122,7 +125,7 @@ bundle_seed_assets() {
 
     if [[ -d "$SEED_ASSETS/kickstarts" ]]; then
         mkdir -p "${SEED_DIR}/roms"
-        cp -a "$SEED_ASSETS/kickstarts/." "${SEED_DIR}/roms/"
+        cp -aL "$SEED_ASSETS/kickstarts/." "${SEED_DIR}/roms/"
         local n
         n="$(find "$SEED_ASSETS/kickstarts" -maxdepth 1 -type f | wc -l)"
         echo "   -> kickstarts/ ($n file(s)) -> seed-assets/roms/"
@@ -131,7 +134,7 @@ bundle_seed_assets() {
 
     if [[ -d "$SEED_ASSETS/harddrives" ]]; then
         mkdir -p "${SEED_DIR}/harddrives"
-        cp -a "$SEED_ASSETS/harddrives/." "${SEED_DIR}/harddrives/"
+        cp -aL "$SEED_ASSETS/harddrives/." "${SEED_DIR}/harddrives/"
         local n
         n="$(find "$SEED_ASSETS/harddrives" -maxdepth 1 -type f | wc -l)"
         echo "   -> harddrives/ ($n file(s)) -> seed-assets/harddrives/"
@@ -223,6 +226,7 @@ build_iso() {
 
 CLEAN=0
 SEED_ASSETS=""
+SQUASHFS_COMP="xz"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean) CLEAN=1; shift ;;
@@ -231,10 +235,21 @@ while [[ $# -gt 0 ]]; do
             SEED_ASSETS="$2"; shift 2 ;;
         --seed-assets=*)
             SEED_ASSETS="${1#*=}"; shift ;;
+        --squashfs-comp)
+            [[ $# -ge 2 ]] || { echo "ERROR: --squashfs-comp requires xz|zstd"; usage; }
+            SQUASHFS_COMP="$2"; shift 2 ;;
+        --squashfs-comp=*)
+            SQUASHFS_COMP="${1#*=}"; shift ;;
         -h|--help) usage ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
 done
+
+case "$SQUASHFS_COMP" in
+    xz|zstd) ;;
+    *) echo "ERROR: --squashfs-comp must be 'xz' or 'zstd' (got: $SQUASHFS_COMP)"; exit 1 ;;
+esac
+export AMICACHY_SQUASHFS_COMP="$SQUASHFS_COMP"
 
 check_root
 import_cachyos_keys

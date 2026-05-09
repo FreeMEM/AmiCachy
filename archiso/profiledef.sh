@@ -12,7 +12,13 @@ bootmodes=('uefi.systemd-boot')
 arch="x86_64"
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"
-airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
+# Compression selectable from build_iso.sh via AMICACHY_SQUASHFS_COMP.
+# Default 'xz' matches the canonical archiso profile (smallest ISO, slow build);
+# 'zstd' is opt-in for big bundled ISOs where compression time dominates.
+case "${AMICACHY_SQUASHFS_COMP:-xz}" in
+    zstd) airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '19' '-b' '1M') ;;
+    xz|*) airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M') ;;
+esac
 
 file_permissions=(
   ["/etc/sudoers.d/amiga"]="0:0:440"
