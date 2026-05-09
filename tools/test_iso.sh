@@ -47,7 +47,14 @@ destroy_vm() {
     if virsh --connect qemu:///system list --all --name 2>/dev/null | grep -q "^${VM_NAME}$"; then
         echo ":: Destroying existing VM '${VM_NAME}'..."
         virsh --connect qemu:///system destroy "$VM_NAME" 2>/dev/null || true
-        virsh --connect qemu:///system undefine "$VM_NAME" --nvram --remove-all-storage 2>/dev/null || true
+        # NEVER use --remove-all-storage here: it would delete every volume
+        # libvirt knows about for this domain, including the ISO the user
+        # passed in (we attach it as a 'disk' volume, not a CD-ROM, to mimic
+        # a USB stick). Drop only the domain + NVRAM, then remove our scratch
+        # qcow2 explicitly via the storage pool API.
+        virsh --connect qemu:///system undefine "$VM_NAME" --nvram 2>/dev/null || true
+        virsh --connect qemu:///system vol-delete --pool default \
+            "${VM_NAME}.qcow2" 2>/dev/null || true
     fi
 }
 
