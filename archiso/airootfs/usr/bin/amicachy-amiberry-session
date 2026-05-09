@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+UAE_CONFIG=""
+USE_RT=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --rt)
+            USE_RT=1
+            shift
+            ;;
+        *)
+            UAE_CONFIG="$1"
+            shift
+            ;;
+    esac
+done
+
+AMIBERRY_HOME="/usr/share/amiberry"
+AMIBERRY_BIN="/usr/bin/amiberry"
+LOGFILE="/tmp/amiberry-launch.log"
+
+if [[ ! -x "$AMIBERRY_BIN" ]]; then
+    echo "amiberry not found: $AMIBERRY_BIN" | tee "$LOGFILE"
+    exit 127
+fi
+
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
+export SDL_HINT_MOUSE_AUTO_CAPTURE=0
+
+if command -v wpctl >/dev/null 2>&1; then
+    for _ in {1..20}; do
+        if wpctl get-volume @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1; then
+            wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/dev/null 2>&1 || true
+            wpctl set-volume @DEFAULT_AUDIO_SINK@ 150% >/dev/null 2>&1 || true
+            break
+        fi
+        sleep 0.25
+    done
+fi
+
+cd "$AMIBERRY_HOME" || true
+
+args=("$AMIBERRY_BIN")
+if [[ -f "$UAE_CONFIG" ]]; then
+    args+=(--config "$UAE_CONFIG")
+else
+    echo "Config not found: $UAE_CONFIG - launching Amiberry GUI" >&2
+fi
+
+args+=(
+    -s use_gui=no
+    -s sound_volume=0
+    -s sound_volume_paula=0
+    -s magic_mouse=true
+    -s magic_mousecursor=native
+    -s absolute_mouse=mousehack
+)
+
+if [[ "$USE_RT" == "1" ]]; then
+    exec chrt -f 52 "${args[@]}" 2>&1 | tee "$LOGFILE"
+else
+    exec "${args[@]}" 2>&1 | tee "$LOGFILE"
+fi

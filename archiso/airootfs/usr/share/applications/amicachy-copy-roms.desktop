@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AmiCachy Copy ROMs
+Comment=Copy Amiga ROM files from USB media
+Exec=foot -e sudo amicachy-copy-roms
+Terminal=false
+Categories=Utility;System;
