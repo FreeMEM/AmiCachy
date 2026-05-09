@@ -60,7 +60,9 @@ for arg in "$@"; do
         -h|--help) usage ;;
         *)
             if [[ -f "$arg" ]]; then
-                ISO_PATH="$arg"
+                # libvirt expects an absolute path; relative ones are
+                # interpreted against the storage pool, not the cwd.
+                ISO_PATH="$(realpath "$arg")"
             else
                 echo "ERROR: File not found: $arg" >&2
                 exit 1
