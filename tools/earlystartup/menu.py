@@ -230,7 +230,7 @@ class EarlyStartupMenu(QWidget):
         boot_inner.addWidget(self._boot_list)
 
         if not self._hdf_paths:
-            no_hdf = QLabel("No .hdf files found")
+            no_hdf = QLabel("No hardfile images found (.hdf/.hdz/.img/.iso)")
             no_hdf.setStyleSheet("color: #666666; font-style: italic;")
             boot_inner.addWidget(no_hdf)
 

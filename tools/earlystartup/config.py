@@ -95,8 +95,15 @@ def scan_roms() -> list[RomEntry]:
     return entries
 
 
+_HARDFILE_EXTS = (".hdf", ".hdz", ".img", ".iso")
+
+
 def scan_hdfs() -> list[str]:
-    """Scan HDF_DIRS for *.hdf files. Returns absolute paths sorted."""
+    """Scan HDF_DIRS for hardfile images. Returns absolute paths sorted.
+
+    Recognized extensions: .hdf (UAE native), .hdz (compressed), .img (raw,
+    used by Coffin OS and similar distributions), .iso (CD-ROM).
+    """
     paths: list[str] = []
     seen: set[str] = set()
 
@@ -104,7 +111,7 @@ def scan_hdfs() -> list[str]:
         if not os.path.isdir(hdf_dir):
             continue
         for fname in sorted(os.listdir(hdf_dir)):
-            if not fname.lower().endswith(".hdf"):
+            if not fname.lower().endswith(_HARDFILE_EXTS):
                 continue
             full = os.path.join(hdf_dir, fname)
             real = os.path.realpath(full)
