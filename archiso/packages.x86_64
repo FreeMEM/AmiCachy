@@ -14,6 +14,11 @@ btrfs-progs
 dosfstools
 e2fsprogs
 ntfs-3g
+exfatprogs
+# Intel RST / RAID (Mac/PC SSDs)
+dmraid
+mdadm
+lvm2
 
 # Network (minimal for live env)
 networkmanager

@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Repair Mac/UEFI fallback boot files for an already installed AmiCachy system.
+
+set -euo pipefail
+
+MOUNTPOINT="/mnt/amicachy"
+ROOT_PART="${1:-}"
+EFI_PART="${2:-}"
+
+log() {
+    printf ':: %s\n' "$*"
+}
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+find_root_partition() {
+    if [[ -n "$ROOT_PART" ]]; then
+        printf '%s\n' "$ROOT_PART"
+        return
+    fi
+
+    blkid -L AMICACHY 2>/dev/null || true
+}
+
+find_efi_partition() {
+    local root_part="$1"
+    if [[ -n "$EFI_PART" ]]; then
+        printf '%s\n' "$EFI_PART"
+        return
+    fi
+
+    local parent
+    parent="$(lsblk -no PKNAME "$root_part" 2>/dev/null | head -1)"
+    [[ -n "$parent" ]] || die "Could not determine parent disk for $root_part"
+    parent="/dev/${parent}"
+
+    lsblk -nrpo PATH,FSTYPE,PARTLABEL "$parent" |
+        awk '
+            BEGIN { found = "" }
+            {
+                path = $1
+                fstype = tolower($2)
+                label = tolower($0)
+                if (fstype ~ /^(vfat|fat32|fat16)$/ || label ~ /efi|esp/) {
+                    found = path
+                    print found
+                    exit
+                }
+            }
+        '
+}
+
+root_part="$(find_root_partition)"
+[[ -n "$root_part" && -b "$root_part" ]] || die "Root partition not found. Try: amicachy-fix-mac-boot /dev/sda3 /dev/sda1"
+
+efi_part="$(find_efi_partition "$root_part")"
+[[ -n "$efi_part" && -b "$efi_part" ]] || die "EFI partition not found. Try: amicachy-fix-mac-boot $root_part /dev/sda1"
+
+log "Root partition: $root_part"
+log "EFI partition:  $efi_part"
+
+mkdir -p "$MOUNTPOINT"
+umount -R "$MOUNTPOINT" 2>/dev/null || true
+
+log "Mounting installed system..."
+mount "$root_part" "$MOUNTPOINT"
+mkdir -p "$MOUNTPOINT/boot"
+mount "$efi_part" "$MOUNTPOINT/boot"
+
+cleanup() {
+    sync
+    umount -R "$MOUNTPOINT" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+log "Installing systemd-boot..."
+arch-chroot "$MOUNTPOINT" bootctl install --esp-path=/boot
+
+log "Installing Mac EFI fallback..."
+mkdir -p "$MOUNTPOINT/boot/EFI/BOOT"
+bootloader=""
+for candidate in \
+    "$MOUNTPOINT/boot/EFI/systemd/systemd-bootx64.efi" \
+    "$MOUNTPOINT/usr/lib/systemd/boot/efi/systemd-bootx64.efi"; do
+    if [[ -f "$candidate" ]]; then
+        bootloader="$candidate"
+        break
+    fi
+done
+
+[[ -n "$bootloader" ]] || die "systemd-bootx64.efi not found in installed system."
+cp -f "$bootloader" "$MOUNTPOINT/boot/EFI/BOOT/BOOTX64.EFI"
+
+log "Verifying boot files..."
+test -f "$MOUNTPOINT/boot/EFI/BOOT/BOOTX64.EFI"
+test -f "$MOUNTPOINT/boot/loader/loader.conf"
+
+log "Done. Reboot and hold Option/Alt; choose EFI Boot."
