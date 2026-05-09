@@ -207,8 +207,10 @@ cleanup_local_packages() {
     if [[ "${HAS_LOCAL_REPO:-0}" -eq 1 ]]; then
         echo ":: Cleaning local package repository..."
         rm -rf "${PROFILE_DIR}/local-repo"
-        # Remove appended local repo section from pacman.conf
+        # Remove appended local repo section from pacman.conf, then trim
+        # any trailing blank lines the heredoc had left behind.
         sed -i '/^# --- AmiCachy Local Repo/,$ d' "${PROFILE_DIR}/pacman.conf"
+        sed -i -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}' "${PROFILE_DIR}/pacman.conf"
         # Remove amiberry line from packages.x86_64
         sed -i '/^amiberry$/d' "${PROFILE_DIR}/packages.x86_64"
     fi

@@ -12,7 +12,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VM_NAME="amicachy-test"
 RAM=4096
 CPUS=2
-DISK_SIZE=40  # GiB — enough for EFI + root + data partitions
+DISK_SIZE=64  # GiB — fits EFI + root + bundled assets with headroom
 
 usage() {
     echo "Usage: $(basename "$0") [ISO_PATH]"
