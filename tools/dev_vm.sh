@@ -726,6 +726,13 @@ cmd_install() {
                 echo ':: Copying packages into VM disk...'
                 cp -v /work/dev/.install-staging/*.pkg.tar.zst \"$MNT/var/cache/pacman/pkg/\"
 
+                # Refresh the chroot's pacman DB so new deps introduced by
+                # the local package can be resolved against current mirrors
+                # (the disk's DB is frozen at create-time and may point at
+                # versions the mirrors no longer carry).
+                echo ':: Refreshing chroot pacman DB...'
+                arch-chroot \"$MNT\" pacman -Sy --noconfirm
+
                 echo ':: Running arch-chroot pacman -U...'
                 arch-chroot \"$MNT\" pacman -U ${chroot_pkgs[*]} --noconfirm
             "
