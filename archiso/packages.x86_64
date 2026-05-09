@@ -19,6 +19,11 @@ ntfs-3g
 networkmanager
 iwd
 dhcpcd
+iw
+wireless-regdb
+# BCM4360 (MacBook) — broadcom-wl needs the kernel headers for DKMS
+broadcom-wl-dkms
+linux-cachyos-headers
 
 # Wayland compositors (wlroots pulled as dependency of cage/labwc)
 cage
