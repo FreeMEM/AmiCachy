@@ -34,9 +34,19 @@ depends=(
 makedepends=('git' 'cmake' 'ninja')
 provides=("amiberry=${pkgver}")
 conflicts=('amiberry-git' 'amiberry-lite')
-source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}")
-sha256sums=('SKIP')
+source=("${pkgname}::git+https://github.com/BlitterStudio/amiberry.git#tag=v${pkgver}"
+        "0001-cfgfile-atomic-save.patch")
+sha256sums=('SKIP'
+            'SKIP')
 options=('!lto')  # CMake handles LTO via WITH_LTO
+
+prepare() {
+    cd "${pkgname}"
+    # AmiCachy: prevent 0-byte .uae after Amiberry crash mid-save
+    # (BlitterStudio/amiberry#1345). Switches cfgfile_save() to write a
+    # temp file, fsync, and rename(2) into place atomically.
+    patch -p1 < "${srcdir}/0001-cfgfile-atomic-save.patch"
+}
 
 build() {
     cd "${pkgname}"

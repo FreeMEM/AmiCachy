@@ -58,8 +58,46 @@ args+=(
     -s absolute_mouse=mousehack
 )
 
+# --- .uae crash protection ----------------------------------------------------
+# Amiberry occasionally crashes mid-save and leaves the .uae truncated to 0
+# bytes. We snapshot the file before launch and, on exit, restore from the
+# snapshot if the live file is missing/empty/garbled. This loses any in-session
+# Save the user did before the crash, but recovers the config that was working
+# at boot — which is much better than losing it entirely.
+_uae_is_valid() {
+    [[ -s "$1" ]] && grep -qE '^[A-Za-z_][A-Za-z0-9_.]*[[:space:]]*=' "$1" 2>/dev/null
+}
+
+backup_uae_config() {
+    [[ -n "$UAE_CONFIG" ]] || return 0
+    if _uae_is_valid "$UAE_CONFIG"; then
+        cp -f "$UAE_CONFIG" "${UAE_CONFIG}.bak" 2>/dev/null || true
+    fi
+}
+
+restore_uae_config_if_corrupt() {
+    [[ -n "$UAE_CONFIG" ]] || return 0
+    [[ -f "$UAE_CONFIG" ]] || return 0
+    _uae_is_valid "$UAE_CONFIG" && return 0
+    if _uae_is_valid "${UAE_CONFIG}.bak"; then
+        cp -f "${UAE_CONFIG}.bak" "$UAE_CONFIG"
+        echo "amicachy-amiberry-session: restored $UAE_CONFIG from .bak (Amiberry crashed mid-save)" >&2
+    fi
+}
+
+backup_uae_config
+# Trap EXIT so the restore runs even if we are killed by SIGTERM during a
+# shutdown/reboot — that is precisely the moment when Amiberry's mid-save
+# crash leaves the .uae truncated and the wrapper would otherwise miss it.
+# bash fires EXIT traps on SIGTERM/SIGINT/SIGHUP as well as normal exit.
+trap restore_uae_config_if_corrupt EXIT
+
 if [[ "$USE_RT" == "1" ]]; then
-    exec chrt -f 52 "${args[@]}" 2>&1 | tee "$LOGFILE"
+    chrt -f 52 "${args[@]}" 2>&1 | tee "$LOGFILE"
+    rc=${PIPESTATUS[0]}
 else
-    exec "${args[@]}" 2>&1 | tee "$LOGFILE"
+    "${args[@]}" 2>&1 | tee "$LOGFILE"
+    rc=${PIPESTATUS[0]}
 fi
+
+exit "$rc"
