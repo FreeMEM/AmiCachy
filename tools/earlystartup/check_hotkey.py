@@ -115,14 +115,20 @@ def _drain_events(fd: int) -> bool:
 
 
 def main() -> int:
-    """Detect F5 in a 4-second window via two paths:
+    """Detect F5 within a tunable window via two paths:
        (a) EVIOCGKEY snapshot — catches the user holding F5 down.
        (b) reading input_event stream — catches a fugacious keypress whose
            edge would otherwise be missed by the snapshot.
     Re-enumerate keyboards each iteration so we still catch a USB / Spice
-    keyboard that surfaces a few hundred ms into the window."""
+    keyboard that surfaces a few hundred ms into the window.
+
+    Window length defaults to 8s but can be overridden with $AMICACHY_HOTKEY_WINDOW."""
+    try:
+        window = float(os.environ.get("AMICACHY_HOTKEY_WINDOW", "8"))
+    except ValueError:
+        window = 8.0
     open_fds: dict[Path, int] = {}
-    deadline = time.monotonic() + 4.0
+    deadline = time.monotonic() + window
     try:
         while time.monotonic() < deadline:
             for dev in _find_keyboards():

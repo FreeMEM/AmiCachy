@@ -127,12 +127,26 @@ export SDL_HINT_MOUSE_AUTO_CAPTURE=0
 # Usermod might fail in live env if not careful, but adding to group is safer.
 usermod -aG input amiga 2>/dev/null || true
 
-# --- Early Startup Control (hold F5 during boot) ---
+# --- Early Startup Control (hold or tap F5 during the prompt below) ---
 EARLY_STARTUP_UAE=""
 if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" && "$PROFILE" != "asset_manager" ]]; then
+    # Visible cue so the user knows when to press F5. Goes to tty1 directly
+    # so it shows up over Plymouth's residual splash. Window is 8 s; the
+    # check_hotkey script honours $AMICACHY_HOTKEY_WINDOW.
+    {
+        printf '\033[?25l'                          # hide cursor
+        printf '\033[2J\033[H'                      # clear + home
+        printf '\033[1;33m'                         # bright yellow
+        printf '\n\n  ════════════════════════════════════════════════════════\n'
+        printf '    Press F5 NOW for AmiCachy Early Startup Control (8 s)\n'
+        printf '  ════════════════════════════════════════════════════════\n'
+        printf '\033[0m\n'
+    } > /dev/tty1 2>/dev/null || true
+
     # Read input as root: the current login session does not gain new input-group
     # membership from usermod until the next login.
-    if sudo -n python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
+    if sudo -n env AMICACHY_HOTKEY_WINDOW=8 \
+        python3 /usr/share/amicachy/tools/earlystartup/check_hotkey.py 2>/dev/null; then
         release_boot_splash
         cage -- /usr/bin/amicachy-earlystartup 2>/dev/null
         if [[ $? -eq 0 && -f "$SESSION_CONFIG" ]]; then
@@ -143,6 +157,10 @@ if [[ "$PROFILE" != "installer" && "$PROFILE" != "dev_station" && "$PROFILE" != 
             fi
         fi
     fi
+
+    # Clear the prompt regardless of outcome so it doesn't linger if the
+    # user did not press F5.
+    printf '\033[2J\033[H' > /dev/tty1 2>/dev/null || true
 fi
 
 # --- Start automount daemon ---
