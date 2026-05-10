@@ -30,6 +30,7 @@ file_permissions=(
   ["/usr/bin/amicachy-fix-mac-boot"]="0:0:755"
   ["/usr/bin/amicachy-installer"]="0:0:755"
   ["/usr/bin/amicachy-link-host-assets"]="0:0:755"
+  ["/usr/bin/amicachy-persistent-data"]="0:0:755"
   ["/usr/bin/amicachy-seed-assets"]="0:0:755"
   ["/usr/bin/amicachy-wifi-debug"]="0:0:755"
   ["/usr/bin/start_dev_env.sh"]="0:0:755"

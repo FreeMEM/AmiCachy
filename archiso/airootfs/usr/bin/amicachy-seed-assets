@@ -19,6 +19,21 @@ DONE_FLAG="${STATE_DIR}/seed-assets.done"
 
 mkdir -p "$STATE_DIR"
 
+# Decide whether a destination directory backs onto persistent writable
+# storage (so we can copy and have full RW) or onto the ISO's tmpfs/overlay
+# (so we must symlink — copying would just blow up RAM).
+_dst_is_persistent() {
+    local dst="$1"
+    local fstype
+    fstype="$(stat -fc %T "$dst" 2>/dev/null)" || return 1
+    case "$fstype" in
+        # ext4, btrfs, xfs, etc. — bind-mounted persistent partition.
+        ext2/ext3|ext4|xfs|btrfs|f2fs) return 0 ;;
+        # tmpfs / overlayfs / squashfs — live RAM, do not copy 28 GB.
+        tmpfs|overlayfs|squashfs|*) return 1 ;;
+    esac
+}
+
 link_dir() {
     local src_dir="$1"
     local dst_dir="$2"
@@ -32,6 +47,11 @@ link_dir() {
         find_expr+=(-iname "*.$ext")
         ((++i))
     done
+    local copy_mode=0
+    if _dst_is_persistent "$dst_dir"; then
+        copy_mode=1
+        echo "  ($dst_dir is on persistent storage — copying instead of symlinking)"
+    fi
     local f base
     while IFS= read -r -d '' f; do
         base="$(basename "$f")"
@@ -39,8 +59,23 @@ link_dir() {
             echo "skip $base (real non-empty file already in $dst_dir)"
             continue
         fi
-        ln -sfn "$f" "$dst_dir/$base"
-        echo "linked $base -> $dst_dir"
+        if [[ $copy_mode -eq 1 ]]; then
+            local src_size avail_kb need_kb
+            src_size="$(stat -Lc %s "$f" 2>/dev/null || echo 0)"
+            need_kb=$(( src_size / 1024 + 1 ))
+            avail_kb="$(df -P --output=avail "$dst_dir" 2>/dev/null | tail -1 | tr -d ' ')"
+            avail_kb="${avail_kb:-0}"
+            if (( avail_kb < need_kb )); then
+                echo "WARN: not enough free space in $dst_dir for $base ($src_size B); falling back to symlink"
+                ln -sfn "$f" "$dst_dir/$base"
+                continue
+            fi
+            cp --reflink=auto -f "$f" "$dst_dir/$base"
+            echo "copied $base -> $dst_dir"
+        else
+            ln -sfn "$f" "$dst_dir/$base"
+            echo "linked $base -> $dst_dir"
+        fi
     done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type f \( "${find_expr[@]}" \) -print0)
 }
 

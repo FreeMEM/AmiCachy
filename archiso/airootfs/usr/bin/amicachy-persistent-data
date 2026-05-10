@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Detect a partition labelled AMICACHY_DATA and bind-mount its Amiberry/
+# subtree on top of /home/amiga/Amiberry, so a live boot can persist
+# user state (configs, custom HDFs, kickstarts) across reboots while
+# the rest of the system stays immutable.
+#
+# Best-effort: silently exits 0 if no such partition is present, so
+# non-persistent live boots are not blocked.
+
+set -uo pipefail
+
+LABEL="AMICACHY_DATA"
+MOUNT_POINT="/run/amicachy-data"
+TARGET="/home/amiga/Amiberry"
+
+DEV="$(blkid -L "$LABEL" 2>/dev/null || true)"
+if [[ -z "$DEV" ]]; then
+    echo "no partition with label '$LABEL'; live persistence inactive"
+    exit 0
+fi
+
+echo "found persistent data partition: $DEV"
+
+mkdir -p "$MOUNT_POINT"
+if ! mountpoint -q "$MOUNT_POINT"; then
+    if ! mount "$DEV" "$MOUNT_POINT" 2>&1; then
+        echo "WARN: failed to mount $DEV at $MOUNT_POINT; persistence inactive"
+        exit 0
+    fi
+fi
+
+# Lay out the expected directory tree on the persistent volume the
+# first time the user boots into it.
+mkdir -p \
+    "$MOUNT_POINT/Amiberry/conf" \
+    "$MOUNT_POINT/Amiberry/roms" \
+    "$MOUNT_POINT/Amiberry/harddrives"
+
+mkdir -p "$TARGET"
+if ! mountpoint -q "$TARGET"; then
+    if ! mount --bind "$MOUNT_POINT/Amiberry" "$TARGET" 2>&1; then
+        echo "WARN: bind-mount $MOUNT_POINT/Amiberry -> $TARGET failed; persistence inactive"
+        exit 0
+    fi
+fi
+
+# Hand the bind-mounted tree back to the amiga user. id may not exist
+# in pathological cases (sysusers raced); fall back silently.
+if id amiga >/dev/null 2>&1; then
+    chown -R amiga:amiga "$TARGET" 2>/dev/null || true
+fi
+
+echo "AmiCachy persistence active: $TARGET <- $MOUNT_POINT/Amiberry"

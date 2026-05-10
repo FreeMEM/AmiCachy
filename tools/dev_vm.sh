@@ -909,7 +909,7 @@ cmd_log() {
 
 cmd_boot_iso() {
     local iso_path="${1:-}"
-    [[ -n "$iso_path" ]] || die "Usage: $0 boot-iso <ISO_PATH> [--scratch PATH] [--reset-scratch]"
+    [[ -n "$iso_path" ]] || die "Usage: $0 boot-iso <ISO_PATH> [--scratch PATH] [--reset-scratch] [--persist [PATH]] [--persist-size SIZE] [--reset-persist]"
     [[ -f "$iso_path" ]] || die "ISO not found: $iso_path"
     iso_path="$(realpath "$iso_path")"
 
@@ -917,12 +917,30 @@ cmd_boot_iso() {
     local OVMF_VARS_TI="${DEV_DIR}/OVMF_VARS-test-iso.fd"
     local SCRATCH_SIZE="${SCRATCH_SIZE:-64G}"
     local RESET_SCRATCH=0
+    # Persistent data partition (label AMICACHY_DATA) attached as a second
+    # USB stick. Lets the live ISO behave like a real pendrive with a
+    # second writable partition.
+    local PERSIST=""           # path to .img file; empty = disabled
+    local PERSIST_SIZE="${PERSIST_SIZE:-32G}"
+    local RESET_PERSIST=0
+    local PERSIST_DEFAULT="${DEV_DIR}/test-iso-persist.img"
 
     shift
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --scratch)       SCRATCH="$2"; shift 2 ;;
             --reset-scratch) RESET_SCRATCH=1; shift ;;
+            --persist)
+                # Optional argument: if next arg looks like a flag or is missing,
+                # use the default path.
+                if [[ $# -ge 2 && "$2" != --* ]]; then
+                    PERSIST="$2"; shift 2
+                else
+                    PERSIST="$PERSIST_DEFAULT"; shift
+                fi
+                ;;
+            --persist-size)  PERSIST_SIZE="$2"; shift 2 ;;
+            --reset-persist) RESET_PERSIST=1; shift ;;
             *) die "Unknown boot-iso option: $1" ;;
         esac
     done
@@ -936,6 +954,26 @@ cmd_boot_iso() {
     if [[ ! -f "$SCRATCH" ]]; then
         echo ":: Creating scratch qcow2 ($SCRATCH_SIZE) at $SCRATCH"
         qemu-img create -f qcow2 "$SCRATCH" "$SCRATCH_SIZE" >/dev/null
+    fi
+
+    # Build the persistent data image on demand: a raw ext4 file with
+    # label AMICACHY_DATA, exactly the layout amicachy-persistent-data
+    # expects on a real pendrive's second partition.
+    local PERSIST_QEMU_ARGS=()
+    if [[ -n "$PERSIST" ]]; then
+        require_cmd mkfs.ext4
+        if [[ $RESET_PERSIST -eq 1 ]]; then
+            rm -f "$PERSIST"
+        fi
+        if [[ ! -f "$PERSIST" ]]; then
+            echo ":: Creating persistent data image ($PERSIST_SIZE) at $PERSIST"
+            qemu-img create -f raw "$PERSIST" "$PERSIST_SIZE" >/dev/null
+            mkfs.ext4 -q -L AMICACHY_DATA -E root_owner=1000:1000 "$PERSIST"
+        fi
+        PERSIST_QEMU_ARGS=(
+            -drive "file=${PERSIST},format=raw,if=none,id=persist0"
+            -device "usb-storage,bus=xhci.0,drive=persist0,removable=on"
+        )
     fi
 
     local OVMF_CODE
@@ -974,12 +1012,13 @@ cmd_boot_iso() {
     echo ":: Booting ISO under QEMU/KVM (no libvirt, no spice)"
     echo "   ISO:     $iso_path"
     echo "   Scratch: $SCRATCH ($SCRATCH_SIZE virtual)"
+    [[ -n "$PERSIST" ]] && echo "   Persist: $PERSIST ($PERSIST_SIZE, ext4 LABEL=AMICACHY_DATA)"
     echo "   RAM: ${RAM}M | CPUs: ${CPUS} | Audio: ${AUDIO_ARGS[1]%%,*}"
     echo "   Serial:  $SERIAL_LOG    (ttyS0 — kernel/firmware)"
     echo "   Journal: $JOURNAL_LOG   (ttyS1 — systemd journal if forwarded)"
     echo "   SSH:     ssh -p 2223 amiga@localhost (live, password 'amiga')"
     echo "   Tip: F5 (Early Startup) goes straight to the guest now."
-    echo "        --reset-scratch wipes the install-target qcow2."
+    echo "        --reset-scratch / --reset-persist wipe the corresponding image."
     echo ""
 
     exec qemu-system-x86_64 \
@@ -993,6 +1032,7 @@ cmd_boot_iso() {
         -drive file="$iso_path",format=raw,if=none,id=usb0,readonly=on \
         -device qemu-xhci,id=xhci \
         -device usb-storage,bus=xhci.0,drive=usb0,bootindex=1,removable=on \
+        "${PERSIST_QEMU_ARGS[@]}" \
         -drive file="$SCRATCH",format=qcow2,if=none,id=hd0,cache=writethrough \
         -device virtio-blk-pci,drive=hd0,bootindex=2 \
         -device "$VGA_DEVICE" \
@@ -1026,7 +1066,11 @@ Commands:
             a separate scratch qcow2 as install target. Same hardware
             (virtio-vga-gl, host CPU, direct keyboard) so F5 etc. work.
             Usage:    $0 boot-iso <ISO_PATH> [--scratch PATH] [--reset-scratch]
-            Env vars: SCRATCH_SIZE (default 64G)
+                          [--persist [PATH]] [--persist-size SIZE] [--reset-persist]
+            Env vars: SCRATCH_SIZE (default 64G), PERSIST_SIZE (default 32G)
+            --persist attaches a second 'USB stick' formatted ext4 with
+            label AMICACHY_DATA, so the live ISO behaves like a real
+            pendrive with a persistent data partition.
   install   Install packages into the VM: local .pkg.tar.zst or repo names (uses Docker)
   log       Tail VM logs. Default: systemd journal (ttyS1).
             Flags: --serial (ttyS0)  --journal (default)  --full (cat)

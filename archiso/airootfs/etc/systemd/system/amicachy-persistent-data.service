@@ -1,0 +1,16 @@
+[Unit]
+Description=AmiCachy: bind-mount /home/amiga/Amiberry from persistent partition (live mode)
+DefaultDependencies=yes
+After=local-fs.target systemd-sysusers.service
+# Both seed-assets and host-assets populate /home/amiga/Amiberry with
+# files. They must run AFTER us so the bind mount is in place when they
+# decide whether to symlink (no persistence) or copy (persistent volume).
+Before=amicachy-host-assets.service amicachy-seed-assets.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-persistent-data
+
+[Install]
+WantedBy=multi-user.target
