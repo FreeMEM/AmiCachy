@@ -106,3 +106,7 @@ plymouth
 parted
 gptfdisk
 arch-install-scripts
+
+# Persistent partition filesystem support (Windows-friendly options)
+ntfs-3g
+exfatprogs

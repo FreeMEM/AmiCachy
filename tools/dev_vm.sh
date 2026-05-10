@@ -922,6 +922,7 @@ cmd_boot_iso() {
     # second writable partition.
     local PERSIST=""           # path to .img file; empty = disabled
     local PERSIST_SIZE="${PERSIST_SIZE:-32G}"
+    local PERSIST_FS="${PERSIST_FS:-ntfs}"   # ntfs | exfat | ext4
     local RESET_PERSIST=0
     local PERSIST_DEFAULT="${DEV_DIR}/test-iso-persist.img"
 
@@ -940,6 +941,7 @@ cmd_boot_iso() {
                 fi
                 ;;
             --persist-size)  PERSIST_SIZE="$2"; shift 2 ;;
+            --persist-fs)    PERSIST_FS="$2"; shift 2 ;;
             --reset-persist) RESET_PERSIST=1; shift ;;
             *) die "Unknown boot-iso option: $1" ;;
         esac
@@ -956,19 +958,30 @@ cmd_boot_iso() {
         qemu-img create -f qcow2 "$SCRATCH" "$SCRATCH_SIZE" >/dev/null
     fi
 
-    # Build the persistent data image on demand: a raw ext4 file with
-    # label AMICACHY_DATA, exactly the layout amicachy-persistent-data
-    # expects on a real pendrive's second partition.
+    # Build the persistent data image on demand: a raw file with the
+    # AMICACHY_DATA label, exactly the layout amicachy-persistent-data
+    # expects on a real pendrive's second partition. Filesystem is
+    # selectable via --persist-fs (default ntfs to match the pendrive
+    # builder, so testing matches what users will see).
     local PERSIST_QEMU_ARGS=()
     if [[ -n "$PERSIST" ]]; then
-        require_cmd mkfs.ext4
+        case "$PERSIST_FS" in
+            ext4)  require_cmd mkfs.ext4 ;;
+            ntfs)  require_cmd mkfs.ntfs ;;
+            exfat) require_cmd mkfs.exfat ;;
+            *) die "--persist-fs must be ntfs|exfat|ext4 (got: $PERSIST_FS)" ;;
+        esac
         if [[ $RESET_PERSIST -eq 1 ]]; then
             rm -f "$PERSIST"
         fi
         if [[ ! -f "$PERSIST" ]]; then
-            echo ":: Creating persistent data image ($PERSIST_SIZE) at $PERSIST"
+            echo ":: Creating persistent data image ($PERSIST_SIZE, $PERSIST_FS) at $PERSIST"
             qemu-img create -f raw "$PERSIST" "$PERSIST_SIZE" >/dev/null
-            mkfs.ext4 -q -L AMICACHY_DATA -E root_owner=1000:1000 "$PERSIST"
+            case "$PERSIST_FS" in
+                ext4)  mkfs.ext4 -q -L AMICACHY_DATA -E root_owner=1000:1000 "$PERSIST" ;;
+                ntfs)  mkfs.ntfs -Q -L AMICACHY_DATA -F "$PERSIST" >/dev/null ;;
+                exfat) mkfs.exfat -L AMICACHY_DATA "$PERSIST" >/dev/null ;;
+            esac
         fi
         PERSIST_QEMU_ARGS=(
             -drive "file=${PERSIST},format=raw,if=none,id=persist0"

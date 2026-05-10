@@ -19,11 +19,34 @@ if [[ -z "$DEV" ]]; then
     exit 0
 fi
 
-echo "found persistent data partition: $DEV"
+# Detect filesystem type so we mount with options appropriate for it.
+# ext4/xfs/btrfs honor POSIX permissions natively; NTFS and exFAT need
+# uid=/gid=/umask= so the amiga user can read and write.
+FSTYPE="$(blkid -s TYPE -o value "$DEV" 2>/dev/null || true)"
+echo "found persistent data partition: $DEV (type: ${FSTYPE:-unknown})"
+
+MOUNT_OPTS=()
+case "$FSTYPE" in
+    ntfs|ntfs3)
+        MOUNT_OPTS=(-t ntfs3 -o "uid=1000,gid=1000,umask=022")
+        ;;
+    exfat)
+        MOUNT_OPTS=(-t exfat -o "uid=1000,gid=1000,umask=022")
+        ;;
+    ext2|ext3|ext4|xfs|btrfs|f2fs)
+        # POSIX filesystem; rely on on-disk ownership.
+        ;;
+    "")
+        echo "WARN: blkid returned empty TYPE for $DEV; trying default mount"
+        ;;
+    *)
+        echo "WARN: unrecognized filesystem '$FSTYPE'; trying default mount"
+        ;;
+esac
 
 mkdir -p "$MOUNT_POINT"
 if ! mountpoint -q "$MOUNT_POINT"; then
-    if ! mount "$DEV" "$MOUNT_POINT" 2>&1; then
+    if ! mount "${MOUNT_OPTS[@]}" "$DEV" "$MOUNT_POINT" 2>&1; then
         echo "WARN: failed to mount $DEV at $MOUNT_POINT; persistence inactive"
         exit 0
     fi

@@ -16,6 +16,7 @@
 #       --iso  out/amicachy-aros-YYYY.MM.DD-x86_64.iso \
 #       [--output out/amicachy-pendrive-YYYY.MM.DD.img] \
 #       [--persist-size 32G] \
+#       [--persist-fs ntfs|exfat|ext4]   # default ntfs (Windows-friendly)
 #       [--conf-dir DIR]                 # whole Amiberry/conf tree
 #       [--roms-dir DIR]                 # whole Amiberry/roms tree
 #       [--hardfiles-dir DIR]            # whole Amiberry/harddrives tree
@@ -37,6 +38,7 @@ OUT_DIR="${PROJECT_DIR}/out"
 ISO=""
 OUTPUT=""
 PERSIST_SIZE="32G"
+PERSIST_FS="ntfs"   # ntfs | exfat | ext4 — ntfs default so Windows mounts it natively
 CONF_DIR=""
 ROMS_DIR=""
 HARDFILES_DIR=""
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         --iso)            ISO="$2"; shift 2 ;;
         --output)         OUTPUT="$2"; shift 2 ;;
         --persist-size)   PERSIST_SIZE="$2"; shift 2 ;;
+        --persist-fs)     PERSIST_FS="$2"; shift 2 ;;
         --conf-dir)       CONF_DIR="$2"; shift 2 ;;
         --roms-dir)       ROMS_DIR="$2"; shift 2 ;;
         --hardfiles-dir)  HARDFILES_DIR="$2"; shift 2 ;;
@@ -72,6 +75,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+case "$PERSIST_FS" in
+    ntfs|exfat|ext4) ;;
+    *) die "--persist-fs must be one of: ntfs, exfat, ext4 (got: $PERSIST_FS)" ;;
+esac
+
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -82,8 +90,14 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [[ -f "$ISO" ]] || die "ISO not found: $ISO"
 ISO="$(realpath "$ISO")"
 
-for cmd in qemu-img sgdisk mkfs.ext4 losetup mount umount blkid; do
-    command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
+REQUIRED=(qemu-img sgdisk losetup mount umount blkid)
+case "$PERSIST_FS" in
+    ext4)  REQUIRED+=(mkfs.ext4) ;;
+    ntfs)  REQUIRED+=(mkfs.ntfs) ;;
+    exfat) REQUIRED+=(mkfs.exfat) ;;
+esac
+for cmd in "${REQUIRED[@]}"; do
+    command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd (install ntfs-3g for ntfs, exfatprogs for exfat)"
 done
 
 # Validate sources up front, before we touch a 30 GB image.
@@ -168,11 +182,25 @@ sleep 1   # let the kernel scan the GPT
 PERSIST_PART="$(ls "${LOOP}"p* | sort -V | tail -1)"
 [[ -b "$PERSIST_PART" ]] || die "Partition device not found after losetup: $PERSIST_PART"
 
-echo ":: Formatting $PERSIST_PART (ext4, label AMICACHY_DATA)..."
-mkfs.ext4 -q -L AMICACHY_DATA -E "root_owner=${OWNER}" "$PERSIST_PART"
+echo ":: Formatting $PERSIST_PART ($PERSIST_FS, label AMICACHY_DATA)..."
+MOUNT_OPTS=()
+case "$PERSIST_FS" in
+    ext4)
+        mkfs.ext4 -q -L AMICACHY_DATA -E "root_owner=${OWNER}" "$PERSIST_PART"
+        ;;
+    ntfs)
+        # mkfs.ntfs interactive prompt suppression: -F to force, -Q quick.
+        mkfs.ntfs -Q -L AMICACHY_DATA -F "$PERSIST_PART"
+        MOUNT_OPTS=(-t ntfs3 -o "uid=${OWNER%:*},gid=${OWNER#*:},umask=022")
+        ;;
+    exfat)
+        mkfs.exfat -L AMICACHY_DATA "$PERSIST_PART"
+        MOUNT_OPTS=(-t exfat -o "uid=${OWNER%:*},gid=${OWNER#*:},umask=022")
+        ;;
+esac
 
 MNT="$(mktemp -d /tmp/amicachy-pendrive.XXXXXX)"
-mount "$PERSIST_PART" "$MNT"
+mount "${MOUNT_OPTS[@]}" "$PERSIST_PART" "$MNT"
 mkdir -p "$MNT/Amiberry/conf" "$MNT/Amiberry/roms" "$MNT/Amiberry/harddrives"
 
 # ---------------------------------------------------------------------------
@@ -211,8 +239,10 @@ if [[ -n "$BOOT_CONFIG_NAME" ]]; then
     echo "$BOOT_REF" > "$MNT/Amiberry/conf/amicachy-boot-config"
 fi
 
-# Make everything owned by amiga(1000) inside the guest.
-chown -R "$OWNER" "$MNT/Amiberry"
+# Make everything owned by amiga(1000) inside the guest. NTFS/exFAT
+# already enforce ownership via the mount options above (uid=,gid=),
+# but chown is harmless on them and authoritative for ext4.
+chown -R "$OWNER" "$MNT/Amiberry" 2>/dev/null || true
 
 sync
 umount "$MNT" && rmdir "$MNT" && MNT=""
