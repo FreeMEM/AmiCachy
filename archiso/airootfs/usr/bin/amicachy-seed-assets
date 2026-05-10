@@ -8,31 +8,53 @@
 set -uo pipefail
 
 SEED_DIR="/usr/share/amicachy/seed-assets"
-AMIBERRY_DIR="/usr/share/amiberry"
+# Amiberry has two roots: a system-wide one configured in the .uae presets
+# and a per-user one it auto-creates the first time the GUI runs. We populate
+# both so kickstarts and HDFs show up regardless of how Amiberry is launched.
+AMIBERRY_DIRS=("/usr/share/amiberry" "/home/amiga/Amiberry")
 STATE_DIR="/var/lib/amicachy"
 DONE_FLAG="${STATE_DIR}/seed-assets.done"
 
 [[ -d "$SEED_DIR" ]] || { echo "no seed-assets dir; nothing to do"; exit 0; }
 
-mkdir -p "$STATE_DIR" "$AMIBERRY_DIR/roms" "$AMIBERRY_DIR/harddrives"
+mkdir -p "$STATE_DIR"
 
 link_dir() {
     local src_dir="$1"
     local dst_dir="$2"
+    shift 2
+    local exts=("$@")
     [[ -d "$src_dir" ]] || return 0
+    local find_expr=()
+    local i=0
+    for ext in "${exts[@]}"; do
+        [[ $i -gt 0 ]] && find_expr+=(-o)
+        find_expr+=(-iname "*.$ext")
+        ((++i))
+    done
     local f base
     while IFS= read -r -d '' f; do
         base="$(basename "$f")"
-        if [[ -e "$dst_dir/$base" && ! -L "$dst_dir/$base" ]]; then
-            echo "skip $base (real file already in $dst_dir)"
+        if [[ -e "$dst_dir/$base" && ! -L "$dst_dir/$base" && -s "$dst_dir/$base" ]]; then
+            echo "skip $base (real non-empty file already in $dst_dir)"
             continue
         fi
         ln -sfn "$f" "$dst_dir/$base"
-        echo "linked $base"
-    done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type f -print0)
+        echo "linked $base -> $dst_dir"
+    done < <(find "$src_dir" -maxdepth 1 -mindepth 1 -type f \( "${find_expr[@]}" \) -print0)
 }
 
-link_dir "$SEED_DIR/roms"       "$AMIBERRY_DIR/roms"
-link_dir "$SEED_DIR/harddrives" "$AMIBERRY_DIR/harddrives"
+for dir in "${AMIBERRY_DIRS[@]}"; do
+    # Always mkdir, even for the per-user one — Amiberry hasn't necessarily
+    # been launched yet when this service runs at first boot.
+    mkdir -p "$dir/roms" "$dir/harddrives"
+    link_dir "$SEED_DIR/roms"       "$dir/roms"       rom key bin
+    link_dir "$SEED_DIR/harddrives" "$dir/harddrives" hdf hdz img iso
+done
+
+# Ensure /home/amiga/Amiberry stays owned by amiga (mkdir above ran as root).
+if id amiga >/dev/null 2>&1 && [[ -d /home/amiga/Amiberry ]]; then
+    chown -R amiga:amiga /home/amiga/Amiberry 2>/dev/null || true
+fi
 
 date -u +%FT%TZ > "$DONE_FLAG"
