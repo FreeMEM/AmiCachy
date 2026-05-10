@@ -263,10 +263,18 @@ def parse_hardfile_paths(hardfiles: list[str]) -> list[str]:
 
 
 def _build_hardfile_line(path: str, index: int) -> str:
-    """Build a hardfile2= value for a given HDF path and device index."""
+    """Build a hardfile2= value for a given HDF path and device index.
+
+    Geometry is left at 0,0,0 so Amiberry auto-detects from the RDB on
+    the image. Hardcoded geometry (e.g. 32,1,2) breaks RDB-formatted
+    images such as Coffin OS, Workbench HDFs and AROS Vision — the
+    emulator picks up the wrong CHS layout and the guest sees garbled
+    partitions / 'Software Failure' on boot. For raw images without an
+    RDB, Amiberry falls back to a sensible default with 0,0,0 too.
+    """
     devname = f"DH{index}"
     bootpri = 0 if index == 0 else -(index)
-    return f"rw,{devname}:{path},32,1,2,512,BOOTPRI={bootpri},,uae"
+    return f"rw,{devname}:{path},0,0,0,512,BOOTPRI={bootpri},,uae"
 
 
 def _write_uae(
