@@ -902,6 +902,99 @@ cmd_log() {
 }
 
 # ---------------------------------------------------------------------------
+# boot-iso — Boot a built ISO under plain QEMU (same hardware setup as
+#            'boot'), so we get virtio-vga-gl, host CPU and direct keyboard
+#            instead of the libvirt+spice path that ate F5 keypresses.
+# ---------------------------------------------------------------------------
+
+cmd_boot_iso() {
+    local iso_path="${1:-}"
+    [[ -n "$iso_path" ]] || die "Usage: $0 boot-iso <ISO_PATH> [--scratch PATH] [--reset-scratch]"
+    [[ -f "$iso_path" ]] || die "ISO not found: $iso_path"
+    iso_path="$(realpath "$iso_path")"
+
+    local SCRATCH="${DEV_DIR}/test-iso-scratch.qcow2"
+    local OVMF_VARS_TI="${DEV_DIR}/OVMF_VARS-test-iso.fd"
+    local SCRATCH_SIZE="${SCRATCH_SIZE:-64G}"
+    local RESET_SCRATCH=0
+
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --scratch)       SCRATCH="$2"; shift 2 ;;
+            --reset-scratch) RESET_SCRATCH=1; shift ;;
+            *) die "Unknown boot-iso option: $1" ;;
+        esac
+    done
+
+    require_cmd qemu-system-x86_64 qemu-img
+
+    if [[ $RESET_SCRATCH -eq 1 ]]; then
+        rm -f "$SCRATCH" "$OVMF_VARS_TI"
+    fi
+    mkdir -p "$DEV_DIR"
+    if [[ ! -f "$SCRATCH" ]]; then
+        echo ":: Creating scratch qcow2 ($SCRATCH_SIZE) at $SCRATCH"
+        qemu-img create -f qcow2 "$SCRATCH" "$SCRATCH_SIZE" >/dev/null
+    fi
+
+    local OVMF_CODE
+    OVMF_CODE="$(find_ovmf_code)"
+    if [[ ! -f "$OVMF_VARS_TI" ]]; then
+        cp "$(find_ovmf_vars)" "$OVMF_VARS_TI"
+    fi
+
+    local AUDIO_ARGS=()
+    if pgrep -x pipewire &>/dev/null; then
+        AUDIO_ARGS=(-audiodev pipewire,id=snd0)
+    elif pgrep -x pulseaudio &>/dev/null; then
+        AUDIO_ARGS=(-audiodev pa,id=snd0)
+    else
+        AUDIO_ARGS=(-audiodev sdl,id=snd0)
+    fi
+
+    local VGA_DEVICE DISPLAY_ARGS
+    if [[ "${DISPLAY_MODE:-auto}" == "safe" ]]; then
+        VGA_DEVICE="virtio-vga"
+        DISPLAY_ARGS="-display gtk"
+    else
+        VGA_DEVICE="virtio-vga-gl"
+        DISPLAY_ARGS="-display gtk,gl=on"
+    fi
+
+    echo ":: Booting ISO under QEMU/KVM (no libvirt, no spice)"
+    echo "   ISO:     $iso_path"
+    echo "   Scratch: $SCRATCH ($SCRATCH_SIZE virtual)"
+    echo "   RAM: ${RAM}M | CPUs: ${CPUS} | Audio: ${AUDIO_ARGS[1]%%,*}"
+    echo "   Tip: F5 (Early Startup) goes straight to the guest now."
+    echo "        --reset-scratch wipes the install-target qcow2."
+    echo ""
+
+    exec qemu-system-x86_64 \
+        -enable-kvm \
+        -machine q35 \
+        -cpu host \
+        -m "$RAM" \
+        -smp "$CPUS" \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+        -drive if=pflash,format=raw,file="$OVMF_VARS_TI" \
+        -drive file="$iso_path",format=raw,if=none,id=usb0,readonly=on \
+        -device qemu-xhci,id=xhci \
+        -device usb-storage,bus=xhci.0,drive=usb0,bootindex=1,removable=on \
+        -drive file="$SCRATCH",format=qcow2,if=none,id=hd0,cache=writethrough \
+        -device virtio-blk-pci,drive=hd0,bootindex=2 \
+        -device "$VGA_DEVICE" \
+        $DISPLAY_ARGS \
+        -device virtio-net-pci,netdev=net0 \
+        -netdev user,id=net0,hostfwd=tcp::2223-:22 \
+        "${AUDIO_ARGS[@]}" \
+        -device ich9-intel-hda \
+        -device hda-duplex,audiodev=snd0 \
+        -usb \
+        -device usb-tablet
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -915,6 +1008,11 @@ Commands:
   create    Create the dev disk and install the system (one-time, uses Docker)
   sync      Sync airootfs + boot entries to the disk (fast, seconds)
   boot      Launch the VM with QEMU/KVM + UEFI
+  boot-iso  Boot a built ISO under the same QEMU/KVM setup as 'boot', with
+            a separate scratch qcow2 as install target. Same hardware
+            (virtio-vga-gl, host CPU, direct keyboard) so F5 etc. work.
+            Usage:    $0 boot-iso <ISO_PATH> [--scratch PATH] [--reset-scratch]
+            Env vars: SCRATCH_SIZE (default 64G)
   install   Install packages into the VM: local .pkg.tar.zst or repo names (uses Docker)
   log       Tail VM logs. Default: systemd journal (ttyS1).
             Flags: --serial (ttyS0)  --journal (default)  --full (cat)
@@ -953,6 +1051,7 @@ case "${1:-}" in
     create)  cmd_create  ;;
     sync)    cmd_sync    ;;
     boot)    cmd_boot    ;;
+    boot-iso) shift; cmd_boot_iso "$@" ;;
     install) shift; cmd_install "$@" ;;
     log)     shift; cmd_log "$@" ;;
     shell)   cmd_shell   ;;
