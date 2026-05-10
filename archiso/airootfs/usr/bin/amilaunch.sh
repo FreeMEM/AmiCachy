@@ -110,6 +110,29 @@ export LIBSEAT_BACKEND="logind"
 # (QEMU bug #2315). Force software cursors. Safe to set on real hardware too.
 export WLR_NO_HARDWARE_CURSORS=1
 
+# --- GPU compatibility ---
+# nouveau (the open NVIDIA driver) ships a broken EGL stack on Turing,
+# Ampere and newer (RTX 20xx, 30xx, 40xx). labwc/cage rely on wlroots
+# which talks to EGL; if EGL fails to initialise the user gets a black
+# screen with "Could not initialize EGL" / "unable to create renderer"
+# in the journal and the live ISO never reaches Amiberry.
+#
+# Pragmatic fallback: when nouveau is loaded and the user hasn't pinned
+# WLR_RENDERER explicitly, use the wlroots software renderer (pixman).
+# pixman renders on the CPU but draws to whichever DRM output nouveau
+# itself is driving — so the picture comes out of the same physical
+# port the monitor is plugged into, no matter whether that's the dGPU
+# or an iGPU. Slightly slower for the compositor, but Amiberry's own
+# emulation surface is unaffected.
+#
+# Users with older NVIDIA cards where nouveau's EGL works (Maxwell /
+# Pascal era) can override by exporting WLR_RENDERER=gles2 before
+# launching, or by editing this block.
+if [[ -z "${WLR_RENDERER:-}" ]] && lsmod 2>/dev/null | grep -qE '^nouveau '; then
+    export WLR_RENDERER=pixman
+    echo "AmiCachy: nouveau detected, using pixman software renderer (avoid EGL crash)" >&2
+fi
+
 # sdl2-compat debug (CachyOS ships sdl2-compat over real SDL2)
 export SDL2COMPAT_DEBUG_LOGGING=1
 
