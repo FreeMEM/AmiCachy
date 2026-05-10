@@ -54,6 +54,8 @@ wireplumber
 mesa
 vulkan-radeon
 vulkan-intel
+vulkan-nouveau
+vulkan-icd-loader
 intel-media-driver
 xf86-video-amdgpu
 
