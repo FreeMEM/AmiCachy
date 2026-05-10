@@ -53,7 +53,7 @@ message.sprite = Sprite();
 message.sprite.SetPosition(0, 0, -1);
 
 // --- F5 hint (bottom-right) ---
-hint.image = Image.Text("Pulsa F5 para Early Startup", 0.7, 0.7, 0.7);
+hint.image = Image.Text("Mantén F5 pulsado para Early Startup", 0.7, 0.7, 0.7);
 hint.sprite = Sprite(hint.image);
 hint.sprite.SetPosition(
     Window.GetWidth()  - hint.image.GetWidth()  - 20,
