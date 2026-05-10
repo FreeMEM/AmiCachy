@@ -63,7 +63,7 @@ link_dir() {
             local src_size avail_kb need_kb
             src_size="$(stat -Lc %s "$f" 2>/dev/null || echo 0)"
             need_kb=$(( src_size / 1024 + 1 ))
-            avail_kb="$(df -P --output=avail "$dst_dir" 2>/dev/null | tail -1 | tr -d ' ')"
+            avail_kb="$(df --output=avail "$dst_dir" 2>/dev/null | tail -1 | tr -d ' ')"
             avail_kb="${avail_kb:-0}"
             if (( avail_kb < need_kb )); then
                 echo "WARN: not enough free space in $dst_dir for $base ($src_size B); falling back to symlink"
