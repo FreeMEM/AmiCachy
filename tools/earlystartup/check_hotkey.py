@@ -11,6 +11,7 @@ Exit codes:
 
 import fcntl
 import os
+import struct
 import sys
 import time
 from pathlib import Path
@@ -18,6 +19,11 @@ from pathlib import Path
 # Linux input event constants (from <linux/input-event-codes.h>)
 EV_KEY = 0x01
 KEY_F5 = 63
+
+# struct input_event { struct timeval time; __u16 type; __u16 code; __s32 value; }
+# timeval is 16 B on 64-bit (long long sec, long long usec).
+_EVENT_FMT = "llHHi"
+_EVENT_SIZE = struct.calcsize(_EVENT_FMT)
 
 # ioctl numbers (from <linux/input.h>)
 _IOC_READ = 2
@@ -86,20 +92,67 @@ def _check_key(dev: Path) -> bool:
         os.close(fd)
 
 
+def _drain_events(fd: int) -> bool:
+    """Read pending input_event records from fd. Return True if any of them
+    was a F5 key-down. Non-blocking — returns immediately when there is
+    nothing to read."""
+    while True:
+        try:
+            data = os.read(fd, _EVENT_SIZE * 64)
+        except BlockingIOError:
+            return False
+        except OSError:
+            return False
+        if not data:
+            return False
+        for i in range(0, len(data), _EVENT_SIZE):
+            chunk = data[i : i + _EVENT_SIZE]
+            if len(chunk) != _EVENT_SIZE:
+                break
+            _sec, _usec, ev_type, ev_code, ev_value = struct.unpack(_EVENT_FMT, chunk)
+            if ev_type == EV_KEY and ev_code == KEY_F5 and ev_value == 1:
+                return True
+
+
 def main() -> int:
-    keyboards = _find_keyboards()
-    if not keyboards:
+    """Detect F5 in a 4-second window via two paths:
+       (a) EVIOCGKEY snapshot — catches the user holding F5 down.
+       (b) reading input_event stream — catches a fugacious keypress whose
+           edge would otherwise be missed by the snapshot.
+    Re-enumerate keyboards each iteration so we still catch a USB / Spice
+    keyboard that surfaces a few hundred ms into the window."""
+    open_fds: dict[Path, int] = {}
+    deadline = time.monotonic() + 4.0
+    try:
+        while time.monotonic() < deadline:
+            for dev in _find_keyboards():
+                if dev not in open_fds:
+                    try:
+                        open_fds[dev] = os.open(
+                            str(dev), os.O_RDONLY | os.O_NONBLOCK
+                        )
+                    except OSError:
+                        continue
+                fd = open_fds[dev]
+                # (a) Held-key snapshot
+                buf = bytearray(96)
+                try:
+                    fcntl.ioctl(fd, _eviocgkey(len(buf)), buf)
+                    if _test_bit(buf, KEY_F5):
+                        return 0
+                except OSError:
+                    pass
+                # (b) Event stream
+                if _drain_events(fd):
+                    return 0
+            time.sleep(0.05)
         return 1
-
-    # Sample for a short window. USB keyboards on Macs can appear late enough
-    # that the original 500ms window misses a held F5.
-    for _ in range(25):
-        for dev in keyboards:
-            if _check_key(dev):
-                return 0
-        time.sleep(0.1)
-
-    return 1
+    finally:
+        for fd in open_fds.values():
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
