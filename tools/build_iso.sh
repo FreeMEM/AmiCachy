@@ -78,6 +78,19 @@ bundle_installer_data() {
     cp -a "${PROJECT_DIR}/tools/installer/"* "${DEST_TOOLS}/installer/"
     echo "   -> tools/installer/ -> airootfs (tools/installer/)"
 
+    # Early Startup Control (Qt menu + check_hotkey.py probe). amilaunch.sh
+    # spawns check_hotkey.py during the autologin window; if it isn't here
+    # the F5 hotkey silently does nothing.
+    mkdir -p "${DEST_TOOLS}/earlystartup"
+    cp -a "${PROJECT_DIR}/tools/earlystartup/"* "${DEST_TOOLS}/earlystartup/"
+    echo "   -> tools/earlystartup/ -> airootfs (tools/earlystartup/)"
+
+    # Asset Manager (fetch_asset). The /usr/bin/amicachy-fetch-asset
+    # launcher in airootfs imports from this path.
+    mkdir -p "${DEST_TOOLS}/fetch_asset"
+    cp -a "${PROJECT_DIR}/tools/fetch_asset/"* "${DEST_TOOLS}/fetch_asset/"
+    echo "   -> tools/fetch_asset/ -> airootfs (tools/fetch_asset/)"
+
     # hardware_audit bridge
     cp -a "${PROJECT_DIR}/tools/hardware_audit.py" "${DEST_TOOLS}/hardware_audit.py"
     echo "   -> tools/hardware_audit.py -> airootfs (tools/)"
@@ -98,6 +111,8 @@ unbundle_installer_data() {
 
     local AIROOTFS="${PROFILE_DIR}/airootfs"
     rm -rf "${AIROOTFS}/usr/share/amicachy/tools/installer"
+    rm -rf "${AIROOTFS}/usr/share/amicachy/tools/earlystartup"
+    rm -rf "${AIROOTFS}/usr/share/amicachy/tools/fetch_asset"
     rm -f  "${AIROOTFS}/usr/share/amicachy/tools/hardware_audit.py"
     rm -f  "${AIROOTFS}/usr/share/amicachy/installer/packages.x86_64"
     rm -f  "${AIROOTFS}/usr/share/amicachy/installer/pacman.conf"
