@@ -954,18 +954,30 @@ cmd_boot_iso() {
     fi
 
     local VGA_DEVICE DISPLAY_ARGS
+    # grab-on-hover keeps the host WM from stealing keys (F5, function keys,
+    # super, etc.) when the QEMU window has the pointer over it.
     if [[ "${DISPLAY_MODE:-auto}" == "safe" ]]; then
         VGA_DEVICE="virtio-vga"
-        DISPLAY_ARGS="-display gtk"
+        DISPLAY_ARGS="-display gtk,grab-on-hover=on"
     else
         VGA_DEVICE="virtio-vga-gl"
-        DISPLAY_ARGS="-display gtk,gl=on"
+        DISPLAY_ARGS="-display gtk,gl=on,grab-on-hover=on"
     fi
+
+    # Capture both serial ports to files so we can inspect kernel output and
+    # any journal that the live ISO writes to ttyS0/ttyS1 post-mortem.
+    local SERIAL_LOG="${DEV_DIR}/iso-serial.log"
+    local JOURNAL_LOG="${DEV_DIR}/iso-journal.log"
+    : > "$SERIAL_LOG"
+    : > "$JOURNAL_LOG"
 
     echo ":: Booting ISO under QEMU/KVM (no libvirt, no spice)"
     echo "   ISO:     $iso_path"
     echo "   Scratch: $SCRATCH ($SCRATCH_SIZE virtual)"
     echo "   RAM: ${RAM}M | CPUs: ${CPUS} | Audio: ${AUDIO_ARGS[1]%%,*}"
+    echo "   Serial:  $SERIAL_LOG    (ttyS0 — kernel/firmware)"
+    echo "   Journal: $JOURNAL_LOG   (ttyS1 — systemd journal if forwarded)"
+    echo "   SSH:     ssh -p 2223 amiga@localhost (live, password 'amiga')"
     echo "   Tip: F5 (Early Startup) goes straight to the guest now."
     echo "        --reset-scratch wipes the install-target qcow2."
     echo ""
@@ -990,6 +1002,8 @@ cmd_boot_iso() {
         "${AUDIO_ARGS[@]}" \
         -device ich9-intel-hda \
         -device hda-duplex,audiodev=snd0 \
+        -serial file:"$SERIAL_LOG" \
+        -serial file:"$JOURNAL_LOG" \
         -usb \
         -device usb-tablet
 }
