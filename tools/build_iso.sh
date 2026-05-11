@@ -14,10 +14,16 @@ OUT_DIR="${PROJECT_DIR}/out"
 CACHYOS_KEY="882DCFE48E2051D48E2562ABF3B607488DB35A47"
 
 usage() {
-    echo "Usage: $(basename "$0") [--clean] [--seed-assets DIR] [--squashfs-comp xz|zstd]"
+    echo "Usage: $(basename "$0") [--clean] [--cpu-arch generic|v3|v4] [--seed-assets DIR] [--squashfs-comp xz|zstd]"
     echo ""
     echo "Options:"
     echo "  --clean              Remove work/ directory before building"
+    echo "  --cpu-arch ARCH      Target CPU baseline (default: v3):"
+    echo "                         generic — any x86-64 CPU since 2003 (no AVX/AVX2)"
+    echo "                         v3      — Haswell+/Excavator+ (AVX2)"
+    echo "                         v4      — Rocket Lake+/Zen 4+ (AVX-512)"
+    echo "                       Output ISO is named amicachy-<ARCH>-DATE-x86_64.iso so"
+    echo "                       you can build all three side-by-side."
     echo "  --seed-assets DIR    Pre-load Amiga ROMs/HDFs from DIR into the ISO."
     echo "                       DIR must contain kickstarts/ and/or harddrives/"
     echo "                       subdirs. The contents become available to Amiberry"
@@ -231,9 +237,42 @@ cleanup_local_packages() {
     fi
 }
 
+select_pacman_conf() {
+    # Materialise archiso/pacman.conf from the per-arch template the
+    # user requested. mkarchiso reads pacman.conf by name (set in
+    # profiledef.sh as pacman_conf="pacman.conf"), so the file has to
+    # exist with the exact name during the build. The template is the
+    # source of truth and stays in git; pacman.conf itself is gitignored.
+    local src="${PROFILE_DIR}/pacman-${CPU_ARCH}.conf"
+    [[ -f "$src" ]] || die "Template not found: $src"
+    cp "$src" "${PROFILE_DIR}/pacman.conf"
+    echo ":: Using ${src##*/} for this build"
+}
+
+cleanup_pacman_conf() {
+    rm -f "${PROFILE_DIR}/pacman.conf"
+}
+
+rename_iso_output() {
+    # mkarchiso emits amicachy-DATE-x86_64.iso (iso_name from
+    # profiledef.sh). Tag it with the arch so the three variants live
+    # side by side without collisions.
+    local raw
+    raw=$(ls -t "${OUT_DIR}"/amicachy-[0-9]*-x86_64.iso 2>/dev/null | head -1)
+    [[ -n "$raw" && -f "$raw" ]] || return 0
+    local date_part="${raw##*amicachy-}"
+    date_part="${date_part%-x86_64.iso}"
+    local renamed="${OUT_DIR}/amicachy-${CPU_ARCH}-${date_part}-x86_64.iso"
+    mv -f "$raw" "$renamed"
+    echo ":: Renamed -> ${renamed##*/}"
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
 build_iso() {
     echo ":: Building ISO..."
     mkarchiso -v -w "$WORK_DIR" -o "$OUT_DIR" "$PROFILE_DIR"
+    rename_iso_output
     echo ""
     echo ":: Done! ISO written to: ${OUT_DIR}/"
     ls -lh "${OUT_DIR}"/*.iso 2>/dev/null || echo "   (no .iso found — check for errors above)"
@@ -244,9 +283,15 @@ build_iso() {
 CLEAN=0
 SEED_ASSETS=""
 SQUASHFS_COMP="xz"
+CPU_ARCH="v3"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean) CLEAN=1; shift ;;
+        --cpu-arch)
+            [[ $# -ge 2 ]] || { echo "ERROR: --cpu-arch requires generic|v3|v4"; usage; }
+            CPU_ARCH="$2"; shift 2 ;;
+        --cpu-arch=*)
+            CPU_ARCH="${1#*=}"; shift ;;
         --seed-assets)
             [[ $# -ge 2 ]] || { echo "ERROR: --seed-assets requires a path"; usage; }
             SEED_ASSETS="$2"; shift 2 ;;
@@ -266,14 +311,19 @@ case "$SQUASHFS_COMP" in
     xz|zstd) ;;
     *) echo "ERROR: --squashfs-comp must be 'xz' or 'zstd' (got: $SQUASHFS_COMP)"; exit 1 ;;
 esac
+case "$CPU_ARCH" in
+    generic|v3|v4) ;;
+    *) echo "ERROR: --cpu-arch must be 'generic', 'v3' or 'v4' (got: $CPU_ARCH)"; exit 1 ;;
+esac
 export AMICACHY_SQUASHFS_COMP="$SQUASHFS_COMP"
 
 check_root
 import_cachyos_keys
 [[ $CLEAN -eq 1 ]] && clean_work
 prepare_dirs
+select_pacman_conf
 setup_local_packages
 bundle_installer_data
 bundle_seed_assets
-trap 'unbundle_installer_data; cleanup_local_packages; unbundle_seed_assets' EXIT
+trap 'unbundle_installer_data; cleanup_local_packages; unbundle_seed_assets; cleanup_pacman_conf' EXIT
 build_iso

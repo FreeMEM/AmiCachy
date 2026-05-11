@@ -1,63 +1,75 @@
 #!/usr/bin/env bash
-# AmiCachy — Build ISO inside an Arch Linux Docker container.
+# AmiCachy — Build ISO inside a CachyOS Docker container.
 # Use this on non-Arch hosts (Ubuntu, Fedora, etc.) where mkarchiso
-# is not available natively.
+# is not available natively, or whenever you want a fully isolated
+# build that does not pull anything from the host's pacman cache.
 #
 # Options:
-#   --generic    Force generic x86-64 packages (ISO boots on any 64-bit CPU)
-#                Without this flag, the CPU is auto-detected and v3 packages
-#                are used if the host supports AVX2.
+#   --cpu-arch generic|v3|v4
+#       Target CPU baseline for the resulting ISO. Default: v3.
+#         generic — any x86-64 CPU since 2003 (no AVX/AVX2). Best for
+#                   distributing to unknown hardware.
+#         v3      — Haswell+/Excavator+ (AVX2). Most modern PCs (2013+).
+#         v4      — Rocket Lake+/Zen 4+ (AVX-512).
+#       The Docker image used to host the build is picked to match.
+#       Output: out/amicachy-<ARCH>-DATE-x86_64.iso
+#
+#   --generic   Alias for --cpu-arch generic (kept for backwards compat).
+#
+#   Other flags (--seed-assets, --squashfs-comp, --clean) are forwarded
+#   to build_iso.sh inside the container.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Parse --generic flag before CPU detection
-FORCE_GENERIC=0
-for arg in "$@"; do
-    case "$arg" in
-        --generic) FORCE_GENERIC=1 ;;
+CPU_ARCH="v3"
+PASSTHROUGH=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --cpu-arch)
+            CPU_ARCH="$2"; shift 2 ;;
+        --cpu-arch=*)
+            CPU_ARCH="${1#*=}"; shift ;;
+        --generic)
+            CPU_ARCH="generic"; shift ;;
+        *)
+            PASSTHROUGH+=("$1"); shift ;;
     esac
 done
 
-# CPU arch detection — auto-selects DOCKER_IMAGE and CPU_ARCH_LEVEL
-# shellcheck source=lib/cpu_arch.sh
-source "${SCRIPT_DIR}/lib/cpu_arch.sh"
+case "$CPU_ARCH" in
+    generic|v3|v4) ;;
+    *) echo "ERROR: --cpu-arch must be 'generic', 'v3' or 'v4' (got: $CPU_ARCH)" >&2; exit 1 ;;
+esac
 
-# If --generic requested, override to use generic image and repos
-if [[ $FORCE_GENERIC -eq 1 && "$CPU_ARCH_LEVEL" != "x86-64" ]]; then
-    echo ":: --generic flag: forcing generic x86-64 packages"
-    # Keep the Docker image matching the host CPU (for build tool compatibility)
-    # but use generic repos for the ISO packages
-    CPU_ARCH_LEVEL="x86-64"
-    echo ""
-fi
+# Pick the Docker image for the build host. The container only needs to
+# RUN the build tools (pacman, mkarchiso); it does not have to be the
+# same arch level as the resulting ISO. Match it to the requested arch
+# so the build host has access to the same package repos the ISO uses.
+case "$CPU_ARCH" in
+    generic) DOCKER_IMAGE="${DOCKER_IMAGE:-cachyos/cachyos:latest}" ;;
+    v3)      DOCKER_IMAGE="${DOCKER_IMAGE:-cachyos/cachyos-v3:latest}" ;;
+    v4)      DOCKER_IMAGE="${DOCKER_IMAGE:-cachyos/cachyos-znver4:latest}" ;;
+esac
 
 if ! command -v docker &>/dev/null; then
     echo "ERROR: docker is not installed." >&2
     exit 1
 fi
 
-# Generate filtered pacman.conf if needed (generic CPU or --generic flag)
-PACMAN_CONF=$(get_pacman_conf "$PROJECT_DIR/archiso/pacman.conf")
-EXTRA_DOCKER_ARGS=()
-if [[ "$PACMAN_CONF" != "$PROJECT_DIR/archiso/pacman.conf" ]]; then
-    # Mount filtered pacman.conf into the container
-    EXTRA_DOCKER_ARGS=(-v "${PACMAN_CONF}:/work/archiso/pacman.conf")
-fi
-
-echo ":: Building AmiCachy ISO in Docker container..."
-echo "   Project dir: ${PROJECT_DIR}"
-echo "   Docker image: ${DOCKER_IMAGE}"
-echo "   CPU arch level: ${CPU_ARCH_LEVEL}"
-echo "   Packages: $(if [[ "$CPU_ARCH_LEVEL" == "x86-64" ]]; then echo "generic x86-64"; else echo "x86-64-v3 (AVX2)"; fi)"
+echo ":: Building AmiCachy ISO in Docker container"
+echo "   Project dir:    ${PROJECT_DIR}"
+echo "   Docker image:   ${DOCKER_IMAGE}"
+echo "   Target CPU:     ${CPU_ARCH}"
+[[ ${#PASSTHROUGH[@]} -gt 0 ]] && echo "   Forwarded args: ${PASSTHROUGH[*]}"
 echo ""
 
 docker run --rm --privileged \
     -v "${PROJECT_DIR}:/work" \
-    "${EXTRA_DOCKER_ARGS[@]}" \
     -w /work \
+    -e "AMICACHY_CPU_ARCH=${CPU_ARCH}" \
     "$DOCKER_IMAGE" \
     bash -c '
         set -euo pipefail
@@ -69,16 +81,19 @@ docker run --rm --privileged \
         pacman-key --init
         pacman-key --populate cachyos archlinux
 
-        echo ":: Setting up CachyOS mirrorlists..."
-        cp /work/archiso/airootfs/etc/pacman.d/cachyos-mirrorlist    /etc/pacman.d/
-        if [[ -f /work/archiso/airootfs/etc/pacman.d/cachyos-v3-mirrorlist ]]; then
-            cp /work/archiso/airootfs/etc/pacman.d/cachyos-v3-mirrorlist /etc/pacman.d/
-        fi
+        echo ":: Copying CachyOS mirrorlists into the container..."
+        cp /work/archiso/airootfs/etc/pacman.d/cachyos-mirrorlist /etc/pacman.d/
+        for ml in cachyos-v3-mirrorlist cachyos-v4-mirrorlist; do
+            if [[ -f /work/archiso/airootfs/etc/pacman.d/$ml ]]; then
+                cp /work/archiso/airootfs/etc/pacman.d/$ml /etc/pacman.d/
+            fi
+        done
 
         echo ""
-        bash /work/tools/build_iso.sh --clean
+        bash /work/tools/build_iso.sh --clean --cpu-arch "$AMICACHY_CPU_ARCH" '"${PASSTHROUGH[*]}"'
     '
 
 echo ""
-echo ":: Container finished. Checking output..."
-ls -lh "${PROJECT_DIR}/out/"*.iso 2>/dev/null || echo "   (no .iso found — check for errors above)"
+echo ":: Container finished. ISO output:"
+ls -lh "${PROJECT_DIR}/out/"amicachy-${CPU_ARCH}-*-x86_64.iso 2>/dev/null \
+    || echo "   (no matching .iso — check for errors above)"
