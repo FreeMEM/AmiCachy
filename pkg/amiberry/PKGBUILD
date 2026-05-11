@@ -17,7 +17,7 @@
 
 pkgname=amiberry
 pkgver=8.1.5
-pkgrel=3
+pkgrel=4
 pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, OpenGL, SDL3)"
 arch=('x86_64')
 url="https://github.com/BlitterStudio/amiberry"
