@@ -73,20 +73,23 @@ Each option must be an optimized, self-contained environment, but sharing the sa
 
 AmiCachy auto-detects your CPU's architecture level and adapts automatically:
 
-| CPU level | Examples | Docker image | Packages | Performance |
-|-----------|----------|-------------|----------|-------------|
-| **x86-64-v3** (AVX2) | Intel Haswell+ (2013), AMD Excavator+ (2015) | `cachyos-v3` | Optimized v3 | Full speed |
-| **x86-64** (generic) | Older Intel/AMD, some VMs | `cachyos` | Generic | ~10-20% slower emulation |
+| CPU level | Examples | Repos used | Packages | Performance |
+|-----------|----------|-----------|----------|-------------|
+| **generic** | Any x86-64 CPU since 2003 | `cachyos`, Arch base | Plain x86-64 | Slowest, max compatibility |
+| **v3** (AVX2) | Intel Haswell+ (2013), AMD Excavator+ (2015) | `cachyos-v3` + above | Optimized v3 | Full speed on most modern PCs |
+| **v4** (AVX-512) | Intel Rocket Lake+ (2021), AMD Zen 4+ (2022) | `cachyos-znver4` + above | Optimized v4 | ~5% over v3 on supported CPUs |
 
-**All build scripts detect this automatically.** No manual configuration needed — if your CPU lacks AVX2, generic packages are used and everything works. You just lose the v3 optimization.
-
-**For distributable ISOs** that need to boot on unknown hardware, use the `--generic` flag:
+Both `build_iso.sh` and `build_iso_docker.sh` accept `--cpu-arch generic|v3|v4` (default `v3`). The output is named `amicachy-<ARCH>-DATE-x86_64.iso` so you can keep all three side by side.
 
 ```bash
-./tools/build_iso_docker.sh --generic   # ISO boots on any x86-64 CPU
+./tools/build_iso_docker.sh --cpu-arch generic   # universal, any x86-64 CPU
+./tools/build_iso_docker.sh --cpu-arch v3        # default — most modern PCs
+./tools/build_iso_docker.sh --cpu-arch v4        # AVX-512 only
 ```
 
-**Boot-time safety:** If a v3-built ISO boots on a machine without AVX2, `amilaunch.sh` detects the mismatch and shows a clear error message with instructions instead of crashing.
+**Boot-time safety:** every variant ships with `amilaunch.sh`, which detects when a CPU is missing required ISA features and shows a clear error message instead of crashing with `SIGILL`.
+
+The pacman config for each variant lives in `archiso/pacman-{generic,v3,v4}.conf`. `Architecture =` is set explicitly per file so a host with newer instructions can never accidentally pull a higher-arch package out of its local cache and ship it inside a lower-arch ISO.
 
 ### Prerequisites
 
@@ -116,17 +119,24 @@ The ISO is the final distributable artifact — a bootable `.iso` file with all 
 
 ```bash
 # Build inside a CachyOS Docker container (works on any host)
-./tools/build_iso_docker.sh
+./tools/build_iso_docker.sh                    # default: --cpu-arch v3
 
-# Build a universal ISO that boots on any x86-64 CPU (no AVX2 needed)
-./tools/build_iso_docker.sh --generic
+# Or directly on a CachyOS / Arch host (faster, no Docker):
+sudo ./tools/build_iso.sh                      # default: --cpu-arch v3
 
-# Output: out/amicachy-YYYY.MM.DD-x86_64.iso
+# Pick the CPU baseline explicitly:
+./tools/build_iso_docker.sh --cpu-arch generic # any x86-64 CPU since 2003
+./tools/build_iso_docker.sh --cpu-arch v3      # Haswell+/Excavator+
+./tools/build_iso_docker.sh --cpu-arch v4      # Rocket Lake+/Zen 4+
+
+# Output: out/amicachy-<ARCH>-YYYY.MM.DD-x86_64.iso
 ```
 
-The script auto-detects your CPU and selects the matching CachyOS Docker image and package repositories. On CPUs with AVX2, it uses optimized x86-64-v3 packages; on older CPUs, it falls back to generic x86-64 packages automatically.
+`generic` is the safest choice when you don't know the target hardware; `v3` is the right default for most current PCs; `v4` only makes sense on a CPU with AVX-512.
 
-Use `--generic` when building ISOs for distribution to others (unknown hardware). Without this flag, the ISO is optimized for your machine's CPU.
+**Pre-loading user-supplied content into the ISO.** `build_iso.sh` accepts `--seed-assets DIR` where `DIR` contains a `kickstarts/` and/or `harddrives/` subtree. Anything inside is bundled into the ISO and exposed to Amiberry on first boot. Useful if you want to build a complete personal image with your own legally-obtained Kickstart ROMs and HDFs, instead of providing them at runtime through the Asset Manager.
+
+**Building flashable pendrive images.** `tools/build_pendrive.sh` wraps any AmiCachy ISO together with a preformatted persistent partition (`AMICACHY_DATA`, NTFS by default so Windows mounts it natively) into a single `.img` that the recipient can flash with one `dd`. Run `./tools/build_pendrive.sh --help` for the full set of flags (assets, persistence size, filesystem type).
 
 **Only build the ISO when you need a distributable image.** For day-to-day development, use the dev VM workflow below.
 
