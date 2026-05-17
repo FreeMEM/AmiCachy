@@ -1062,6 +1062,183 @@ cmd_boot_iso() {
 }
 
 # ---------------------------------------------------------------------------
+# boot-img — Boot a pendrive .img (output of build_pendrive.sh) under QEMU
+#            as if it were the real USB stick. Copies the .img to a
+#            scratch location so the original stays pristine, optionally
+#            grows the copy to simulate a larger physical pendrive (so
+#            amicachy-grow-data.service has free space to expand into).
+# ---------------------------------------------------------------------------
+
+cmd_boot_img() {
+    local img_path="${1:-}"
+    [[ -n "$img_path" ]] || die "Usage: $0 boot-img <PENDRIVE_IMG> [--disk-size SIZE] [--reset]"
+    [[ -f "$img_path" ]] || die "Pendrive image not found: $img_path"
+    img_path="$(realpath "$img_path")"
+
+    local SIM_SIZE="8G"
+    local RESET_IMG=0
+    local DEBUG=0
+
+    shift
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --disk-size) SIM_SIZE="$2"; shift 2 ;;
+            --reset)     RESET_IMG=1; shift ;;
+            --debug)     DEBUG=1; shift ;;
+            *) die "Unknown boot-img option: $1" ;;
+        esac
+    done
+
+    require_cmd qemu-system-x86_64 qemu-img numfmt
+
+    mkdir -p "$DEV_DIR"
+    local TEST_IMG="${DEV_DIR}/$(basename "${img_path%.img}")-test.img"
+    local OVMF_VARS_BI="${DEV_DIR}/OVMF_VARS-boot-img.fd"
+
+    if [[ $RESET_IMG -eq 1 ]]; then
+        rm -f "$TEST_IMG" "$OVMF_VARS_BI"
+    fi
+
+    # Refresh the test image if the source .img is newer, otherwise reuse
+    # so the autogrow result and any user state persist across boots.
+    if [[ ! -f "$TEST_IMG" || "$img_path" -nt "$TEST_IMG" ]]; then
+        echo ":: Copying $img_path -> $TEST_IMG"
+        cp --reflink=auto "$img_path" "$TEST_IMG"
+    else
+        echo ":: Reusing existing $TEST_IMG (pass --reset to start over)"
+    fi
+
+    # Grow the copy to SIM_SIZE so amicachy-grow-data has room to expand
+    # into. Refuse to shrink — that would lop off the seed partition.
+    local IMG_BYTES SIM_BYTES
+    IMG_BYTES="$(stat -c %s "$TEST_IMG")"
+    SIM_BYTES="$(numfmt --from=iec "$SIM_SIZE" 2>/dev/null || echo 0)"
+    if (( SIM_BYTES == 0 )); then
+        die "--disk-size '$SIM_SIZE' is not a valid size (e.g. 8G, 512M)"
+    fi
+    if (( SIM_BYTES < IMG_BYTES )); then
+        die "--disk-size $SIM_SIZE is smaller than the source .img ($(numfmt --to=iec --suffix=B "$IMG_BYTES")); use a larger value"
+    fi
+    if (( SIM_BYTES > IMG_BYTES )); then
+        echo ":: Resizing $TEST_IMG to $SIM_SIZE (simulated pendrive size)"
+        qemu-img resize -f raw "$TEST_IMG" "$SIM_BYTES" >/dev/null
+    fi
+
+    # --debug: rewrite the systemd-boot loader entries inside the ESP to
+    # drop "quiet splash loglevel=0" and add console=ttyS0+console=tty1
+    # so every kernel/userspace message is captured in img-serial.log
+    # (and visible on screen) without us having to mash 'e' at the menu.
+    if [[ $DEBUG -eq 1 ]]; then
+        require_cmd losetup mount umount sed sudo
+        echo ":: --debug enabled, patching systemd-boot entries for verbose console"
+        local DBG_LOOP DBG_MNT DBG_ESP
+        DBG_LOOP="$(sudo losetup --find --show -P "$TEST_IMG")"
+        # ESP is the FAT32 partition; pick whichever loop partition contains loader/
+        DBG_MNT="$(mktemp -d /tmp/amicachy-boot-img-esp.XXXXXX)"
+        DBG_ESP=""
+        for p in "${DBG_LOOP}"p*; do
+            [[ -b "$p" ]] || continue
+            if sudo mount -o ro "$p" "$DBG_MNT" 2>/dev/null; then
+                if [[ -d "$DBG_MNT/loader/entries" ]]; then
+                    sudo umount "$DBG_MNT"
+                    DBG_ESP="$p"
+                    break
+                fi
+                sudo umount "$DBG_MNT"
+            fi
+        done
+        if [[ -z "$DBG_ESP" ]]; then
+            sudo losetup -d "$DBG_LOOP"
+            rmdir "$DBG_MNT"
+            die "--debug: could not find loader/entries on any partition of $TEST_IMG"
+        fi
+        sudo mount "$DBG_ESP" "$DBG_MNT"
+        # Replace silencing flags with verbose console. Idempotent: if we
+        # already patched, the sed is a no-op.
+        sudo sed -i -E '
+            s/\bquiet\b//g;
+            s/\bsplash\b//g;
+            s/\bloglevel=0\b//g;
+            s/\brd\.systemd\.show_status=false\b/rd.systemd.show_status=true/g;
+            s/\brd\.udev\.log_priority=3\b/rd.udev.log_priority=info/g;
+            s/\budev\.log_priority=3\b/udev.log_priority=info/g;
+            s/\bsystemd\.show_status=false\b/systemd.show_status=true/g;
+            s/\bvt\.global_cursor_default=0\b//g;
+            s/\blogo\.nologo\b//g;
+            /^options /{ /console=ttyS0/!s/$/ console=ttyS0,115200n8 console=tty1/ }
+        ' "$DBG_MNT"/loader/entries/*.conf
+        echo "   Patched entries:"
+        sudo grep -H "^options " "$DBG_MNT"/loader/entries/*.conf | sed 's|^|     |'
+        sync
+        sudo umount "$DBG_MNT" && rmdir "$DBG_MNT"
+        sudo losetup -d "$DBG_LOOP"
+    fi
+
+    local OVMF_CODE
+    OVMF_CODE="$(find_ovmf_code)"
+    if [[ ! -f "$OVMF_VARS_BI" ]]; then
+        cp "$(find_ovmf_vars)" "$OVMF_VARS_BI"
+    fi
+
+    local AUDIO_ARGS=()
+    if pgrep -x pipewire &>/dev/null; then
+        AUDIO_ARGS=(-audiodev pipewire,id=snd0)
+    elif pgrep -x pulseaudio &>/dev/null; then
+        AUDIO_ARGS=(-audiodev pa,id=snd0)
+    else
+        AUDIO_ARGS=(-audiodev sdl,id=snd0)
+    fi
+
+    local VGA_DEVICE DISPLAY_ARGS
+    if [[ "${DISPLAY_MODE:-auto}" == "safe" ]]; then
+        VGA_DEVICE="virtio-vga"
+        DISPLAY_ARGS="-display gtk,grab-on-hover=on"
+    else
+        VGA_DEVICE="virtio-vga-gl"
+        DISPLAY_ARGS="-display gtk,gl=on,grab-on-hover=on"
+    fi
+
+    local SERIAL_LOG="${DEV_DIR}/img-serial.log"
+    local JOURNAL_LOG="${DEV_DIR}/img-journal.log"
+    : > "$SERIAL_LOG"
+    : > "$JOURNAL_LOG"
+
+    echo ":: Booting pendrive image under QEMU/KVM as USB stick"
+    echo "   Source:    $img_path ($(numfmt --to=iec --suffix=B "$IMG_BYTES"))"
+    echo "   Test img:  $TEST_IMG ($SIM_SIZE simulated)"
+    echo "   RAM: ${RAM}M | CPUs: ${CPUS} | Audio: ${AUDIO_ARGS[1]%%,*}"
+    echo "   Serial:    $SERIAL_LOG    (ttyS0 — kernel)"
+    echo "   Journal:   $JOURNAL_LOG   (ttyS1 — systemd journal)"
+    echo "   SSH:       ssh -p 2223 amiga@localhost (live, password 'amiga')"
+    echo "   Tip:       inside the live, 'journalctl -u amicachy-grow-data --no-pager'"
+    echo "              shows whether autogrow ran and what it did."
+    echo ""
+
+    exec qemu-system-x86_64 \
+        -enable-kvm \
+        -machine q35 \
+        -cpu host \
+        -m "$RAM" \
+        -smp "$CPUS" \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+        -drive if=pflash,format=raw,file="$OVMF_VARS_BI" \
+        -drive file="$TEST_IMG",format=raw,if=none,id=usb0 \
+        -device qemu-xhci,id=xhci \
+        -device usb-storage,bus=xhci.0,drive=usb0,bootindex=1,removable=on \
+        -device "$VGA_DEVICE" \
+        $DISPLAY_ARGS \
+        -device virtio-net-pci,netdev=net0 \
+        -netdev user,id=net0,hostfwd=tcp::2223-:22 \
+        "${AUDIO_ARGS[@]}" \
+        -device ich9-intel-hda \
+        -device hda-duplex,audiodev=snd0 \
+        -serial file:"$SERIAL_LOG" \
+        -serial file:"$JOURNAL_LOG" \
+        -usb \
+        -device usb-tablet
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1084,6 +1261,17 @@ Commands:
             --persist attaches a second 'USB stick' formatted ext4 with
             label AMICACHY_DATA, so the live ISO behaves like a real
             pendrive with a persistent data partition.
+  boot-img  Boot a pendrive .img (output of build_pendrive.sh) as a USB
+            stick. Copies the .img to dev/ so the original stays pristine,
+            optionally grows the copy to simulate a larger physical
+            pendrive so amicachy-grow-data.service has room to expand.
+            Usage:    $0 boot-img <PENDRIVE_IMG> [--disk-size SIZE] [--reset] [--debug]
+            Defaults: --disk-size 8G   (must be >= source .img size)
+            --reset wipes the cached copy and starts over from the source.
+            --debug  patches the systemd-boot entries in the test image to
+                     drop "quiet splash" + add console=ttyS0,115200n8 so
+                     every kernel/journal message is captured in
+                     dev/img-serial.log (needs sudo to loop-mount the ESP).
   install   Install packages into the VM: local .pkg.tar.zst or repo names (uses Docker)
   log       Tail VM logs. Default: systemd journal (ttyS1).
             Flags: --serial (ttyS0)  --journal (default)  --full (cat)
@@ -1123,6 +1311,7 @@ case "${1:-}" in
     sync)    cmd_sync    ;;
     boot)    cmd_boot    ;;
     boot-iso) shift; cmd_boot_iso "$@" ;;
+    boot-img) shift; cmd_boot_img "$@" ;;
     install) shift; cmd_install "$@" ;;
     log)     shift; cmd_log "$@" ;;
     shell)   cmd_shell   ;;
