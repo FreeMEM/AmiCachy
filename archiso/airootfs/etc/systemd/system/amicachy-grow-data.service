@@ -5,7 +5,12 @@ After=local-fs.target systemd-udev-settle.service
 # Must run BEFORE the bind-mount, otherwise the partition is busy and
 # sgdisk/ntfsresize cannot touch it.
 Before=amicachy-persistent-data.service
-ConditionPathIsDirectory=/run/archiso/bootmnt
+# Skip when there is no AMICACHY_DATA label on any block device at all
+# (e.g. running on an installed system, or a live boot without the
+# persistence partition). The script itself does the deeper validation
+# (matching ISO9660 AMICACHY_* label on the same disk) before touching
+# anything, so this is just a cheap early exit.
+ConditionPathExists=/dev/disk/by-label/AMICACHY_DATA
 
 [Service]
 Type=oneshot

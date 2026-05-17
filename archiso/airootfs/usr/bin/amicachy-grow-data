@@ -30,35 +30,42 @@ log()  { echo "[$LOG_TAG] $*"; }
 warn() { echo "[$LOG_TAG] WARN: $*" >&2; }
 bail() { log "$1; nothing to do"; exit 0; }
 
-# --- 1. Identify the boot disk -------------------------------------------
-# archiso mounts the boot medium at /run/archiso/bootmnt. If that path is
-# absent we are not booted from removable media (e.g. running in a VM
-# from a CD-ROM with no GPT data partition) and there is nothing to grow.
-BOOTMNT="/run/archiso/bootmnt"
-[[ -d "$BOOTMNT" ]] || bail "no $BOOTMNT (not an archiso live boot)"
+# --- 1. Locate AMICACHY_DATA and validate boot disk ---------------------
+# archiso initially mounts the boot medium at /run/archiso/bootmnt, but
+# in real-USB boots (as opposed to VM loops) that mount is torn down as
+# soon as the squashfs is copied to RAM — by the time this unit runs,
+# /run/archiso/bootmnt does not exist. Don't depend on it.
+#
+# Safe alternative: find AMICACHY_DATA by its blkid label, then *prove*
+# the disk it sits on is "our" pendrive by checking the same disk also
+# carries the ISO9660 partition with an AMICACHY_* label. That pairing
+# only exists on a stick produced by build_pendrive.sh, so we can grow
+# it without ever risking the user's internal drives.
 
-BOOT_PART="$(findmnt -n -o SOURCE "$BOOTMNT" 2>/dev/null || true)"
-[[ -n "$BOOT_PART" && -b "$BOOT_PART" ]] || bail "could not resolve boot partition"
-
-BOOT_DISK_NAME="$(lsblk -no PKNAME "$BOOT_PART" 2>/dev/null || true)"
-[[ -n "$BOOT_DISK_NAME" ]] || bail "could not resolve parent disk of $BOOT_PART"
-BOOT_DISK="/dev/$BOOT_DISK_NAME"
-[[ -b "$BOOT_DISK" ]] || bail "boot disk $BOOT_DISK is not a block device"
-
-# NOTE: we deliberately do NOT require lsblk RM=1 here. dev_vm.sh boots
-# the same .img inside QEMU where the virtual disk is not flagged
-# removable, and we want autogrow to be exercisable there. Safety comes
-# from the "AMICACHY_DATA must live on the boot disk" check below.
-
-# --- 2. Locate AMICACHY_DATA on that disk --------------------------------
 DATA_PART="$(blkid -L "$LABEL" 2>/dev/null || true)"
 [[ -n "$DATA_PART" && -b "$DATA_PART" ]] || bail "no partition labelled $LABEL"
 
 DATA_DISK_NAME="$(lsblk -no PKNAME "$DATA_PART" 2>/dev/null || true)"
-if [[ "/dev/$DATA_DISK_NAME" != "$BOOT_DISK" ]]; then
-    warn "$LABEL lives on /dev/$DATA_DISK_NAME, not boot disk $BOOT_DISK; skipping"
+[[ -n "$DATA_DISK_NAME" ]] || bail "could not resolve parent disk of $DATA_PART"
+BOOT_DISK="/dev/$DATA_DISK_NAME"
+[[ -b "$BOOT_DISK" ]] || bail "disk $BOOT_DISK is not a block device"
+
+# Confirm an AMICACHY_*-labelled iso9660 partition lives on the same
+# disk. The label varies by month (e.g. AMICACHY_202605), so we glob.
+_iso_match=0
+for _p in $(lsblk -ln -o NAME "$BOOT_DISK" | tail -n +2); do
+    _info=$(blkid "/dev/${_p}" 2>/dev/null) || continue
+    if echo "$_info" | grep -qE 'TYPE="iso9660"' \
+        && echo "$_info" | grep -qE 'LABEL="AMICACHY_'; then
+        _iso_match=1
+        break
+    fi
+done
+if [[ $_iso_match -eq 0 ]]; then
+    warn "$BOOT_DISK has no AMICACHY_* iso9660 partition; refusing to touch it"
     exit 0
 fi
+unset _p _info _iso_match
 
 PART_NUM="$(echo "$DATA_PART" | grep -oE '[0-9]+$' || true)"
 [[ -n "$PART_NUM" ]] || bail "could not parse partition number from $DATA_PART"
