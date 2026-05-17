@@ -17,8 +17,8 @@
 
 pkgname=amiberry
 pkgver=8.1.5
-pkgrel=4
-pkgdesc="Optimized Amiga emulator — AmiCachy build (x86-64-v3, OpenGL, SDL3)"
+pkgrel=5
+pkgdesc="Optimized Amiga emulator — AmiCachy build (OpenGL, SDL3, ARCH-aware)"
 arch=('x86_64')
 url="https://github.com/BlitterStudio/amiberry"
 license=('GPL-3.0-or-later')
@@ -50,10 +50,24 @@ prepare() {
 
 build() {
     cd "${pkgname}"
+
+    # CachyOS makepkg.conf sets CFLAGS="-march=native ..." which silently
+    # turns this package into a host-CPU-specific binary: build on a Zen 4
+    # host and you get AVX-512 in the .pkg, then SIGILL on every other
+    # machine. Override with an explicit target so the resulting .pkg is
+    # portable to any CPU at that x86-64 level.
+    #
+    # AMICACHY_CPU_ARCH_LEVEL is set by tools/build_amiberry.sh; default
+    # x86-64-v3 (AVX2 baseline, ~99% of consumer CPUs since 2013-2015).
+    local _arch_level="${AMICACHY_CPU_ARCH_LEVEL:-x86-64-v3}"
+    local _arch_flags="-march=${_arch_level} -mtune=generic"
+
     cmake -B build \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_C_FLAGS="${CFLAGS} ${_arch_flags}" \
+        -DCMAKE_CXX_FLAGS="${CXXFLAGS} ${_arch_flags}" \
         -DWITH_LTO=OFF \
         -DUSE_OPENGL=ON \
         -DUSE_DBUS=ON \
