@@ -1,6 +1,12 @@
 # Base system
 base
 linux-cachyos
+# linux-cachyos-headers intentionally omitted from the live image: nothing
+# at runtime needs them (nvidia-open-dkms's module is already compiled
+# into the squashfs at pacstrap time), they cost ~160 MB, and a live ISO
+# never recompiles modules. The installer adds them back on a `pacman -S`
+# to disk so post-install kernel updates can rebuild DKMS modules.
+#
 # linux-firmware split (Arch ~2025-Q4) no longer ships GPU/Wi-Fi blobs in the
 # base package — RTX 2000/3000/4000 (Turing/Ampere/Ada) require GSP firmware
 # from linux-firmware-nvidia or nouveau hangs the boot. Enumerate all
@@ -43,9 +49,11 @@ iwd
 dhcpcd
 iw
 wireless-regdb
-# BCM4360 (MacBook) — broadcom-wl needs the kernel headers for DKMS
-broadcom-wl-dkms
-linux-cachyos-headers
+# broadcom-wl-dkms + linux-cachyos-headers (~165 MB combined) intentionally
+# omitted from the live: broadcom-wl is only useful for the old BCM4360
+# Wi-Fi (MacBook 2013-2015), and DKMS needs the headers at build time,
+# which the live cannot do. Users on those machines can `pacman -S
+# broadcom-wl-dkms linux-cachyos-headers` after installing to disk.
 
 # Wayland compositors (wlroots pulled as dependency of cage/labwc)
 cage
@@ -102,20 +110,23 @@ enet
 tinyxml2
 gnu-free-fonts
 
-# Alternative emulator (FS-UAE) — used for AROS bundles where Amiberry's
-# Picasso96 driver hits a horizontal-tiling bug on cage+SDL2+Wayland.
-fs-uae
+# fs-uae intentionally absent: the FS-UAE+RTG path was needed to host the
+# AROS Vision bundle, but DOS3 filesystem tooling on Linux is too
+# limiting to ship that bundle properly (see asset-catalog.json
+# _fsuae_attempt_outcome). All current bundles run on Amiberry+AGA.
 
-# Development profile
+# GUI runtime — installer, early-startup menu, asset fetcher and
+# hardware audit are all PySide6/Qt apps. `code` is for the Dev Station
+# profile only; if you don't ship that profile, drop it to save ~530 MB.
 code
 python
 pyside6
 qt6-wayland
 
-# System tools
+# System tools (git intentionally omitted: 0 runtime references; only
+# the build host needs it)
 htop
 nano
-git
 bash-completion
 man-db
 sudo
