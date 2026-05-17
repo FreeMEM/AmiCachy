@@ -14,10 +14,21 @@ OUT_DIR="${PROJECT_DIR}/out"
 CACHYOS_KEY="882DCFE48E2051D48E2562ABF3B607488DB35A47"
 
 usage() {
-    echo "Usage: $(basename "$0") [--clean] [--cpu-arch generic|v3|v4] [--seed-assets DIR] [--squashfs-comp xz|zstd]"
+    echo "Usage: $(basename "$0") [--reuse-work] [--cpu-arch generic|v3|v4] [--seed-assets DIR] [--squashfs-comp xz|zstd]"
     echo ""
     echo "Options:"
-    echo "  --clean              Remove work/ directory before building"
+    echo "  --reuse-work         Keep the work/ directory between builds (faster"
+    echo "                       iteration when only the airootfs changed). Default"
+    echo "                       is to wipe work/ so mkarchiso re-runs every stage —"
+    echo "                       otherwise its stamp files cause packages.x86_64 and"
+    echo "                       airootfs/ changes to be silently skipped."
+    echo "  --clean              Deprecated: now the default. Accepted for backwards"
+    echo "                       compatibility, no-op."
+    echo "  --no-auto-amiberry   Skip auto-building amiberry when no .pkg matching"
+    echo "                       --cpu-arch is found in out/. Default is to invoke"
+    echo "                       ./tools/build_amiberry.sh --cpu-arch <arch> on the fly"
+    echo "                       so a fresh checkout produces a complete ISO with"
+    echo "                       one command."
     echo "  --cpu-arch ARCH      Target CPU baseline (default: v3):"
     echo "                         generic — any x86-64 CPU since 2003 (no AVX/AVX2)"
     echo "                         v3      — Haswell+/Excavator+ (AVX2)"
@@ -184,24 +195,63 @@ setup_local_packages() {
     local LOCAL_REPO="${PROFILE_DIR}/local-repo"
     local pkgs=()
 
-    for f in "${OUT_DIR}"/amiberry-*.pkg.tar.zst; do
-        [[ -f "$f" ]] && pkgs+=("$f")
-    done
+    # Prefer packages tagged with the current --cpu-arch, since builds before
+    # 2026-05 emitted un-tagged binaries (built with -march=native, host-pinned)
+    # that SIGILL on any CPU other than the one that compiled them.
+    # Match: amiberry-<ver>-<rel>-<arch>-x86_64.pkg.tar.zst
+    _collect_arch_pkgs() {
+        pkgs=()
+        for f in "${OUT_DIR}"/amiberry-*-"${CPU_ARCH}"-x86_64.pkg.tar.zst; do
+            [[ -f "$f" ]] && pkgs+=("$f")
+        done
+    }
+    _collect_arch_pkgs
+
+    # Auto-build if missing and the user has not opted out.
+    if [[ ${#pkgs[@]} -eq 0 && "${AUTO_AMIBERRY:-1}" -eq 1 ]]; then
+        echo ":: No amiberry-${CPU_ARCH} package found; building it now (--no-auto-amiberry to skip)..."
+        if ! "${SCRIPT_DIR}/build_amiberry.sh" --cpu-arch "$CPU_ARCH"; then
+            echo ":: ERROR: build_amiberry.sh failed; aborting ISO build."
+            echo "   Re-run with --no-auto-amiberry to continue without amiberry."
+            exit 1
+        fi
+        _collect_arch_pkgs
+    fi
 
     if [[ ${#pkgs[@]} -eq 0 ]]; then
-        echo ":: WARNING: No amiberry package found in out/"
-        echo "   Build it first: ./tools/build_amiberry.sh"
-        echo "   The ISO will be built WITHOUT amiberry."
-        echo ""
-        HAS_LOCAL_REPO=0
-        return
+        # Fall back to un-tagged packages, but warn loudly — they may have
+        # been built with -march=native on a different host CPU.
+        local untagged=()
+        for f in "${OUT_DIR}"/amiberry-*-x86_64.pkg.tar.zst; do
+            [[ -f "$f" ]] || continue
+            # Skip already-tagged variants (covered above).
+            case "$(basename "$f")" in
+                *-generic-x86_64.pkg.tar.zst|*-v3-x86_64.pkg.tar.zst|*-v4-x86_64.pkg.tar.zst) continue ;;
+            esac
+            untagged+=("$f")
+        done
+        if [[ ${#untagged[@]} -eq 0 ]]; then
+            echo ":: WARNING: No amiberry package for --cpu-arch $CPU_ARCH in out/"
+            echo "   Build it first: ./tools/build_amiberry.sh --cpu-arch $CPU_ARCH"
+            echo "   The ISO will be built WITHOUT amiberry."
+            echo ""
+            HAS_LOCAL_REPO=0
+            return
+        fi
+        echo ":: WARNING: no tagged amiberry-*-${CPU_ARCH}-x86_64.pkg.tar.zst; using untagged build"
+        echo "   That .pkg was likely built with -march=native (host-pinned) and may"
+        echo "   SIGILL on other CPUs. Rebuild with:"
+        echo "       ./tools/build_amiberry.sh --cpu-arch $CPU_ARCH"
+        pkgs=("${untagged[@]}")
     fi
 
     echo ":: Setting up local package repository..."
     mkdir -p "$LOCAL_REPO"
 
-    # Copy the latest amiberry package
-    local latest_pkg="${pkgs[-1]}"
+    # Most-recently-modified wins within the matching set, so a fresh
+    # tagged build supersedes any older one.
+    local latest_pkg
+    latest_pkg=$(ls -t "${pkgs[@]}" | head -1)
     cp "$latest_pkg" "$LOCAL_REPO/"
     echo "   -> $(basename "$latest_pkg")"
 
@@ -280,13 +330,16 @@ build_iso() {
 
 # --- Main ---
 
-CLEAN=0
+REUSE_WORK=0
 SEED_ASSETS=""
 SQUASHFS_COMP="xz"
 CPU_ARCH="v3"
+AUTO_AMIBERRY=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --clean) CLEAN=1; shift ;;
+        --reuse-work) REUSE_WORK=1; shift ;;
+        --no-auto-amiberry) AUTO_AMIBERRY=0; shift ;;
+        --clean) shift ;;   # deprecated no-op (clean is now the default)
         --cpu-arch)
             [[ $# -ge 2 ]] || { echo "ERROR: --cpu-arch requires generic|v3|v4"; usage; }
             CPU_ARCH="$2"; shift 2 ;;
@@ -319,8 +372,25 @@ export AMICACHY_SQUASHFS_COMP="$SQUASHFS_COMP"
 
 check_root
 import_cachyos_keys
-[[ $CLEAN -eq 1 ]] && clean_work
+# Clean by default. mkarchiso uses stamp files in work/ to skip stages it
+# has already done, so reusing work/ across edits silently produces an
+# outdated ISO (the most common cause of "my changes didn't take effect").
+# Use --reuse-work explicitly when you know your edits only affect things
+# downstream of the cached stages.
+if [[ $REUSE_WORK -eq 0 ]]; then
+    clean_work
+else
+    echo ":: Reusing work/ (--reuse-work). mkarchiso stamps may skip stages."
+fi
 prepare_dirs
+
+# mkarchiso pins SOURCE_DATE_EPOCH from $work_dir/build_date when that
+# file exists (mkarchiso:1881-1885), which would freeze the build mtime
+# to the first run. Remove it on every build so the new SOURCE_DATE_EPOCH
+# we set below sticks — under --reuse-work as well, so the .iso mtime
+# always reflects this build, not a stale stamp.
+rm -f "${WORK_DIR}/build_date"
+export SOURCE_DATE_EPOCH="$(date +%s)"
 select_pacman_conf
 setup_local_packages
 bundle_installer_data
