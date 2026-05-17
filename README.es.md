@@ -134,11 +134,30 @@ sudo ./tools/build_iso.sh                      # por defecto: --cpu-arch v3
 
 `generic` es la opcion mas segura cuando no conoces el hardware destino; `v3` es el default razonable para la mayoria de PCs actuales; `v4` solo tiene sentido en una CPU con AVX-512.
 
+**Builds limpias por defecto.** `build_iso.sh` borra `work/` antes de cada build para que los cambios en `packages.x86_64` o `airootfs/` se apliquen siempre (mkarchiso usa stamp files en `work/` y se saltaria etapas silenciosamente). Para iterar rapido cuando solo cambias cosas que el cache no invalida, pasa `--reuse-work`.
+
+**El binario de Amiberry esta etiquetado por arch y se construye on-demand.** `tools/build_amiberry.sh --cpu-arch generic|v3|v4` produce `out/amiberry-<VER>-<REL>-<arch>-x86_64.pkg.tar.zst` con `-march=x86-64-vN -mtune=generic` forzado (anula el `-march=native` de CachyOS, que de otro modo deja el binario atado a la CPU del host de build y provoca `SIGILL` en cualquier otra maquina). `build_iso.sh --cpu-arch X` elige el `.pkg` correspondiente; si no existe, llama a `build_amiberry.sh --cpu-arch X` automaticamente (desactiva con `--no-auto-amiberry`). De golpe las tres arches: `./tools/build_amiberry.sh --cpu-arch all`.
+
+**Matriz de release en un solo comando.** `tools/build_all.sh` construye las tres variantes de amiberry, las tres ISOs y los tres `.img` de pendrive en una sola pasada. Idempotente: los artefactos ya presentes en `out/` se reutilizan a no ser que pases `--force`. Subselecionable con `--arch v3,v4` y `--skip-{amiberry,iso,pendrive}`. Cachea sudo antes (`sudo -v`) para que no se quede a media matriz pidiendo contrasena.
+
+```bash
+./tools/build_all.sh                       # todo, las tres arches
+./tools/build_all.sh --arch v3             # una arch end-to-end
+./tools/build_all.sh --skip-pendrive       # ISOs + amiberry, sin pendrives
+./tools/build_all.sh --force               # rebuild aunque ya existan
+```
+
 **Pre-cargar contenido propio en la ISO.** `build_iso.sh` acepta `--seed-assets DIR` donde `DIR` contiene un arbol `kickstarts/` y/o `harddrives/`. Lo que haya dentro se incluye en la ISO y queda disponible para Amiberry en el primer arranque. Util si quieres construir una imagen personal completa con tus propias Kickstart ROMs y HDFs (obtenidos legalmente), en vez de aportarlos en runtime mediante el Asset Manager.
 
-**Construir imagenes flasheables para pendrive.** `tools/build_pendrive.sh` envuelve cualquier ISO de AmiCachy junto con una particion persistente preformateada (`AMICACHY_DATA`, NTFS por defecto para que Windows la monte de forma nativa) en un unico `.img` que el receptor flashea con un solo `dd`. Ejecuta `./tools/build_pendrive.sh --help` para ver todas las opciones (assets, tamano de persistencia, tipo de filesystem).
+**Construir imagenes flasheables para pendrive.** `tools/build_pendrive.sh` envuelve cualquier ISO de AmiCachy con una particion seed pequena (256 MB) `AMICACHY_DATA` (NTFS por defecto para que Windows la monte de forma nativa) en un unico `.img` que se flashea con un solo `dd`. La imagen se mantiene compacta a proposito — en el primer arranque desde el pendrive, `amicachy-grow-data.service` expande automaticamente `AMICACHY_DATA` para ocupar todo el espacio libre del stick (NTFS/ext4; exFAT se deja como esta). Asi, un pendrive de 64 GB acaba con ~63 GB de espacio escribible sin forzarte a distribuir un `.img` de 60 GB. Ejecuta `./tools/build_pendrive.sh --help` para ver todas las opciones (assets, tamano del seed, tipo de filesystem).
 
 **Solo construye la ISO cuando necesites una imagen distribuible.** Para el desarrollo del dia a dia, usa el flujo de la VM de desarrollo.
+
+#### Notas de compatibilidad hardware
+
+- **GPUs NVIDIA.** Las ISOs publicadas incluyen el driver propietario de NVIDIA (`nvidia-open-dkms` + `nvidia-utils`, soporta Turing+) y blacklistean nouveau via cmdline. Es la unica configuracion en la que Wayland/EGL funciona de forma fiable en RTX 20xx/30xx/40xx — el camino GSP de nouveau todavia falla con Ampere y rompe cage/wlroots. `nvidia-utils` esta bajo la NVIDIA Software License (limpia para redistribucion gratuita; el LICENSE se instala en `/usr/share/licenses/nvidia-utils/LICENSE`).
+- **Maquinas multi-GPU.** `amilaunch.sh` elige la tarjeta DRM cuyo conector aparece `connected` (en empate gana el de mayor modo nativo) y fija wlroots a esa via `WLR_DRM_DEVICES`. Conecta el cable a la GPU que quieras usar — portatiles con graficos hibridos, sobremesas con dGPU + iGPU, etc., se manejan todos igual.
+- **Firmware blobs.** A finales de 2025 `linux-firmware` se fragmento upstream; incluimos explicitamente los splits de hardware de consumo (nvidia, amdgpu, intel, broadcom, atheros, realtek, mediatek, …) para que los kernels arranquen en RTX 20xx+ (sin `linux-firmware-nvidia` se cuelgan en Plymouth en hardware real).
 
 ### VM de desarrollo (iteracion rapida)
 
@@ -180,6 +199,8 @@ sudo -v && ./tools/dev_vm.sh sync
 | `./tools/dev_vm.sh create` | Una vez: crear disco, pacstrap, configurar (usa Docker) |
 | `./tools/dev_vm.sh sync` | Sincronizar airootfs + boot entries + installer (segundos) |
 | `./tools/dev_vm.sh boot` | Lanzar la VM con QEMU/KVM + UEFI |
+| `./tools/dev_vm.sh boot-iso <ISO>` | Arrancar una ISO ya construida bajo el mismo QEMU, con un qcow2 scratch como destino de instalacion. Anade `--persist` para conectar un segundo "USB stick" con label `AMICACHY_DATA`. |
+| `./tools/dev_vm.sh boot-img <IMG>` | Arrancar un `.img` de pendrive (salida de `build_pendrive.sh`) como USB stick. Copia el `.img` a `dev/` para no tocar el original y lo crece con `--disk-size 8G` (por defecto) para ejercitar `amicachy-grow-data`. Anade `--debug` para parchear las entries de systemd-boot y volcar todo el output del kernel/journal en `dev/img-serial.log`. |
 | `./tools/dev_vm.sh install <pkg\|nombre>` | Instalar paquetes .pkg.tar.zst locales o del repo en la VM (usa Docker) |
 | `./tools/dev_vm.sh log` | Ver el log de arranque en tiempo real (`--full` para log completo) |
 | `./tools/dev_vm.sh shell` | Montar el disco para inspeccion manual (subshell interactivo) |

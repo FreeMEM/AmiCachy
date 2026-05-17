@@ -134,11 +134,30 @@ sudo ./tools/build_iso.sh                      # default: --cpu-arch v3
 
 `generic` is the safest choice when you don't know the target hardware; `v3` is the right default for most current PCs; `v4` only makes sense on a CPU with AVX-512.
 
+**Clean builds by default.** `build_iso.sh` wipes `work/` before every build so that changes to `packages.x86_64` or `airootfs/` are picked up reliably (mkarchiso uses stamp files in `work/` and would otherwise silently skip stages). For fast iteration when you're only tweaking things that survive the cache, pass `--reuse-work`.
+
+**Amiberry binary is arch-tagged and built on demand.** `tools/build_amiberry.sh --cpu-arch generic|v3|v4` produces `out/amiberry-<VER>-<REL>-<arch>-x86_64.pkg.tar.zst` with `-march=x86-64-vN -mtune=generic` baked in (overrides CachyOS's `-march=native`, which otherwise pins the binary to the build host's CPU and causes `SIGILL` on any other machine). `build_iso.sh --cpu-arch X` picks the matching `.pkg`; if it doesn't exist, it invokes `build_amiberry.sh --cpu-arch X` automatically (disable with `--no-auto-amiberry`). One-shot for all three arches at once: `./tools/build_amiberry.sh --cpu-arch all`.
+
+**Release matrix in one command.** `tools/build_all.sh` builds the three amiberry variants, the three ISOs, and the three pendrive `.img`s in a single run. Idempotent: artifacts already in `out/` are reused unless you pass `--force`. Sub-selectable with `--arch v3,v4` and `--skip-{amiberry,iso,pendrive}`. Cache `sudo` first (`sudo -v`) so it doesn't stall mid-matrix asking for the password.
+
+```bash
+./tools/build_all.sh                       # everything, all three arches
+./tools/build_all.sh --arch v3             # one arch end-to-end
+./tools/build_all.sh --skip-pendrive       # ISOs + amiberry only
+./tools/build_all.sh --force               # rebuild even if outputs exist
+```
+
 **Pre-loading user-supplied content into the ISO.** `build_iso.sh` accepts `--seed-assets DIR` where `DIR` contains a `kickstarts/` and/or `harddrives/` subtree. Anything inside is bundled into the ISO and exposed to Amiberry on first boot. Useful if you want to build a complete personal image with your own legally-obtained Kickstart ROMs and HDFs, instead of providing them at runtime through the Asset Manager.
 
-**Building flashable pendrive images.** `tools/build_pendrive.sh` wraps any AmiCachy ISO together with a preformatted persistent partition (`AMICACHY_DATA`, NTFS by default so Windows mounts it natively) into a single `.img` that the recipient can flash with one `dd`. Run `./tools/build_pendrive.sh --help` for the full set of flags (assets, persistence size, filesystem type).
+**Building flashable pendrive images.** `tools/build_pendrive.sh` wraps any AmiCachy ISO with a small (256 MB) `AMICACHY_DATA` seed partition (NTFS by default so Windows mounts it natively) into a single `.img` you can flash with one `dd`. The image is intentionally compact — on the first boot from the pendrive, `amicachy-grow-data.service` automatically expands `AMICACHY_DATA` to fill all remaining space on the stick (NTFS/ext4; exFAT is left alone). So a 64 GB pendrive ends up with ~63 GB of writable user space without forcing you to ship a 60 GB `.img`. Run `./tools/build_pendrive.sh --help` for the full set of flags (assets, seed size, filesystem type).
 
 **Only build the ISO when you need a distributable image.** For day-to-day development, use the dev VM workflow below.
+
+#### Hardware support notes
+
+- **NVIDIA GPUs.** Shipping ISOs include the proprietary NVIDIA driver (`nvidia-open-dkms` + `nvidia-utils`, Turing+ supported) and blacklist nouveau via the kernel cmdline. This is the only configuration where Wayland/EGL works reliably on RTX 20xx/30xx/40xx — nouveau's GSP path is still flaky on Ampere and breaks cage/wlroots. `nvidia-utils` is under the NVIDIA Software License (redistribution-clean for free distribution; the LICENSE ships at `/usr/share/licenses/nvidia-utils/LICENSE`).
+- **Multi-GPU machines.** `amilaunch.sh` picks the DRM card whose connector is actually `connected` (largest preferred mode wins ties) and pins wlroots to it via `WLR_DRM_DEVICES`. Plug your cable into whichever GPU you want to drive the session — laptops with hybrid graphics, sobremesa with dGPU + iGPU, etc., are all handled the same way.
+- **Firmware blobs.** `linux-firmware` was split upstream in late 2025; we explicitly include the consumer-hardware splits (nvidia, amdgpu, intel, broadcom, atheros, realtek, mediatek, …) so RTX 20xx+ kernels boot at all (without `linux-firmware-nvidia` they hang at Plymouth on bare metal).
 
 ### Development VM (fast iteration)
 
@@ -180,6 +199,8 @@ sudo -v && ./tools/dev_vm.sh sync
 | `./tools/dev_vm.sh create` | One-time: create disk, pacstrap, configure (uses Docker) |
 | `./tools/dev_vm.sh sync` | Sync airootfs + boot entries + installer tools (seconds) |
 | `./tools/dev_vm.sh boot` | Launch the VM with QEMU/KVM + UEFI |
+| `./tools/dev_vm.sh boot-iso <ISO>` | Boot a built ISO under the same QEMU setup, with a scratch qcow2 as install target. Add `--persist` to attach a second USB stick labelled `AMICACHY_DATA`. |
+| `./tools/dev_vm.sh boot-img <IMG>` | Boot a pendrive `.img` (output of `build_pendrive.sh`) as a USB stick. Copies the `.img` to `dev/` so the original stays pristine and grows the copy with `--disk-size 8G` (default) to exercise `amicachy-grow-data`. Add `--debug` to patch the systemd-boot entries for verbose kernel/journal output in `dev/img-serial.log`. |
 | `./tools/dev_vm.sh install <pkg\|name>` | Install local .pkg.tar.zst or repo packages into the VM (uses Docker) |
 | `./tools/dev_vm.sh log` | Tail the serial boot log in real time (`--full` for complete log) |
 | `./tools/dev_vm.sh shell` | Mount the disk for manual inspection (interactive subshell) |
