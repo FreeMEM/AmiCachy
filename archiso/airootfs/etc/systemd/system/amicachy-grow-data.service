@@ -1,0 +1,16 @@
+[Unit]
+Description=AmiCachy: grow AMICACHY_DATA partition to fill the pendrive (first boot)
+DefaultDependencies=yes
+After=local-fs.target systemd-udev-settle.service
+# Must run BEFORE the bind-mount, otherwise the partition is busy and
+# sgdisk/ntfsresize cannot touch it.
+Before=amicachy-persistent-data.service
+ConditionPathIsDirectory=/run/archiso/bootmnt
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-grow-data
+
+[Install]
+WantedBy=multi-user.target

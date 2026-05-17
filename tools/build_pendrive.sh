@@ -11,11 +11,18 @@
 # user state (configs, ROMs, hardfiles, .uae) you bundled, all on a
 # writable filesystem. No post-flash partitioning needed.
 #
+# The .img is kept small: it only carries a 256 MB seed partition holding
+# the default configs/ROMs/hardfiles you bundle. On the FIRST boot from the
+# pendrive, AmiCachy automatically grows that partition (and its NTFS
+# filesystem) to occupy ALL remaining space on the stick — so a 64 GB
+# pendrive ends up with ~63 GB of writable user space without forcing you
+# to ship a 60 GB image.
+#
 # Usage:
 #   sudo ./tools/build_pendrive.sh \
 #       --iso  out/amicachy-aros-YYYY.MM.DD-x86_64.iso \
 #       [--output out/amicachy-pendrive-YYYY.MM.DD.img] \
-#       [--persist-size 32G] \
+#       [--persist-size 256M] \
 #       [--persist-fs ntfs|exfat|ext4]   # default ntfs (Windows-friendly)
 #       [--conf-dir DIR]                 # whole Amiberry/conf tree
 #       [--roms-dir DIR]                 # whole Amiberry/roms tree
@@ -37,8 +44,9 @@ OUT_DIR="${PROJECT_DIR}/out"
 
 ISO=""
 OUTPUT=""
-PERSIST_SIZE="32G"
-PERSIST_FS="ntfs"   # ntfs | exfat | ext4 — ntfs default so Windows mounts it natively
+PERSIST_SIZE="256M"   # seed size only; amicachy-grow-data extends it on first boot
+PERSIST_FS="ntfs"     # ntfs | exfat | ext4 — ntfs default so Windows mounts it natively
+                      # (NOTE: only ntfs auto-grows; exfat/ext4 seed remains seed-sized)
 CONF_DIR=""
 ROMS_DIR=""
 HARDFILES_DIR=""
@@ -257,3 +265,14 @@ echo ""
 echo "    sudo dd if=$OUTPUT of=/dev/sdX bs=4M status=progress oflag=sync"
 echo ""
 echo "Then boot from it."
+echo ""
+case "$PERSIST_FS" in
+    ntfs|ext4)
+        echo "On first boot AmiCachy will automatically grow AMICACHY_DATA"
+        echo "to use ALL remaining space on the pendrive (currently $PERSIST_SIZE seed)."
+        ;;
+    exfat)
+        echo "NOTE: exfat is NOT auto-grown on first boot; AMICACHY_DATA will"
+        echo "      stay at $PERSIST_SIZE. Pass --persist-fs ntfs to enable autogrow."
+        ;;
+esac

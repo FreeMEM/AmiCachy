@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# AmiCachy — first-boot autogrow for AMICACHY_DATA.
+#
+# build_pendrive.sh ships a small (e.g. 256 MB) AMICACHY_DATA partition at
+# the tail of the .img so users do not have to flash a 30 GB image. On the
+# first boot from a pendrive, this script:
+#
+#   1. Identifies the disk the system actually booted from (via
+#      /run/archiso/bootmnt) — so a misconfigured user disk is never
+#      touched.
+#   2. Confirms AMICACHY_DATA lives on that same disk, as the last
+#      partition, with usable free space behind it.
+#   3. Moves the GPT backup header to the real end-of-disk (`sgdisk -e`)
+#      and recreates the partition keeping its original first sector but
+#      consuming all remaining space.
+#   4. Grows the filesystem in-place — NTFS via `ntfsresize`, ext4 via
+#      `resize2fs`. exFAT has no online grow path and is left alone.
+#
+# Best-effort and idempotent: any sanity check that fails causes the
+# script to exit 0 silently so the boot is never blocked. After the first
+# successful run there is < ~16 MiB of free space behind the partition
+# and we early-exit.
+
+set -uo pipefail
+
+LABEL="AMICACHY_DATA"
+LOG_TAG="amicachy-grow-data"
+
+log()  { echo "[$LOG_TAG] $*"; }
+warn() { echo "[$LOG_TAG] WARN: $*" >&2; }
+bail() { log "$1; nothing to do"; exit 0; }
+
+# --- 1. Identify the boot disk -------------------------------------------
+# archiso mounts the boot medium at /run/archiso/bootmnt. If that path is
+# absent we are not booted from removable media (e.g. running in a VM
+# from a CD-ROM with no GPT data partition) and there is nothing to grow.
+BOOTMNT="/run/archiso/bootmnt"
+[[ -d "$BOOTMNT" ]] || bail "no $BOOTMNT (not an archiso live boot)"
+
+BOOT_PART="$(findmnt -n -o SOURCE "$BOOTMNT" 2>/dev/null || true)"
+[[ -n "$BOOT_PART" && -b "$BOOT_PART" ]] || bail "could not resolve boot partition"
+
+BOOT_DISK_NAME="$(lsblk -no PKNAME "$BOOT_PART" 2>/dev/null || true)"
+[[ -n "$BOOT_DISK_NAME" ]] || bail "could not resolve parent disk of $BOOT_PART"
+BOOT_DISK="/dev/$BOOT_DISK_NAME"
+[[ -b "$BOOT_DISK" ]] || bail "boot disk $BOOT_DISK is not a block device"
+
+# NOTE: we deliberately do NOT require lsblk RM=1 here. dev_vm.sh boots
+# the same .img inside QEMU where the virtual disk is not flagged
+# removable, and we want autogrow to be exercisable there. Safety comes
+# from the "AMICACHY_DATA must live on the boot disk" check below.
+
+# --- 2. Locate AMICACHY_DATA on that disk --------------------------------
+DATA_PART="$(blkid -L "$LABEL" 2>/dev/null || true)"
+[[ -n "$DATA_PART" && -b "$DATA_PART" ]] || bail "no partition labelled $LABEL"
+
+DATA_DISK_NAME="$(lsblk -no PKNAME "$DATA_PART" 2>/dev/null || true)"
+if [[ "/dev/$DATA_DISK_NAME" != "$BOOT_DISK" ]]; then
+    warn "$LABEL lives on /dev/$DATA_DISK_NAME, not boot disk $BOOT_DISK; skipping"
+    exit 0
+fi
+
+PART_NUM="$(echo "$DATA_PART" | grep -oE '[0-9]+$' || true)"
+[[ -n "$PART_NUM" ]] || bail "could not parse partition number from $DATA_PART"
+
+# Refuse to touch anything but the last partition — sgdisk -d/-n on a
+# middle partition would orphan the partitions after it.
+LAST_PART_NUM="$(sgdisk -p "$BOOT_DISK" 2>/dev/null \
+    | awk '/^ *[0-9]+ / {n=$1} END {print n}')"
+if [[ "$PART_NUM" != "$LAST_PART_NUM" ]]; then
+    warn "$LABEL is not the last partition (#$PART_NUM, last is #$LAST_PART_NUM); skipping"
+    exit 0
+fi
+
+# --- 3. Read partition geometry ------------------------------------------
+# `sgdisk -i N $DISK` prints e.g. "First sector: 2048 (at 1024.0 KiB)".
+PART_FIRST="$(sgdisk -i "$PART_NUM" "$BOOT_DISK" 2>/dev/null \
+    | awk '/^First sector:/ {print $3; exit}')"
+PART_LAST="$(sgdisk -i "$PART_NUM" "$BOOT_DISK" 2>/dev/null \
+    | awk '/^Last sector:/ {print $3; exit}')"
+
+# DISK_LAST is read AFTER `sgdisk -e` below — the .img produced by
+# build_pendrive.sh has its GPT backup header sitting at the end of the
+# .img, NOT at the end of the physical pendrive/disk it was flashed to.
+# Reading sgdisk -p before -e returns the .img's last usable sector
+# (e.g. 2 GB) even on an 8 GB stick, so the free-space check would
+# always conclude "0 sectors free" and bail. We move the backup header
+# first, *then* check.
+
+if ! [[ "$PART_FIRST" =~ ^[0-9]+$ && "$PART_LAST" =~ ^[0-9]+$ ]]; then
+    warn "could not parse partition geometry; skipping (first=$PART_FIRST last=$PART_LAST)"
+    exit 0
+fi
+
+# --- 4. Detect filesystem and ensure it is offline -----------------------
+FSTYPE="$(blkid -s TYPE -o value "$DATA_PART" 2>/dev/null || true)"
+case "$FSTYPE" in
+    ntfs|ntfs3|ext2|ext3|ext4) ;;
+    exfat)
+        warn "exfat has no online grow tool; leaving $DATA_PART at seed size"
+        exit 0 ;;
+    "")
+        warn "blkid returned empty TYPE for $DATA_PART; skipping autogrow"
+        exit 0 ;;
+    *)
+        warn "unsupported filesystem '$FSTYPE'; skipping autogrow"
+        exit 0 ;;
+esac
+
+# This service is ordered Before=amicachy-persistent-data.service so the
+# bind-mount has not happened yet — but be defensive in case something
+# else mounted it.
+if mountpoint -q "$DATA_PART" 2>/dev/null \
+        || findmnt -n --source "$DATA_PART" >/dev/null 2>&1; then
+    umount "$DATA_PART" 2>/dev/null || {
+        warn "$DATA_PART is mounted and cannot be unmounted; skipping"
+        exit 0
+    }
+fi
+
+# --- 5. Move the GPT backup header to the real end of the disk -----------
+# `sgdisk -e` is idempotent. On a pendrive that already had its backup
+# at the real end (e.g. second boot, or .img matching pendrive size
+# exactly) it is effectively a no-op. We must do this BEFORE measuring
+# free space — see the long comment in step 3 above.
+if ! sgdisk -e "$BOOT_DISK" >/dev/null 2>&1; then
+    warn "sgdisk -e on $BOOT_DISK failed; skipping autogrow"
+    exit 0
+fi
+
+# Now DISK_LAST reflects the real physical disk capacity.
+DISK_LAST="$(sgdisk -p "$BOOT_DISK" 2>/dev/null \
+    | awk '/last usable sector is/ {print $NF; exit}')"
+
+if ! [[ "$DISK_LAST" =~ ^[0-9]+$ ]]; then
+    warn "could not parse disk geometry after sgdisk -e (disk_last=$DISK_LAST)"
+    exit 0
+fi
+
+# --- 6. Decide whether we actually need to grow --------------------------
+# 32 MiB of slack = 65536 sectors @ 512 B. If we already use up to that,
+# there is nothing meaningful to reclaim — most likely we already grew
+# on a previous boot, or the pendrive is the same size as the seed .img.
+SLACK_SECTORS=65536
+FREE_SECTORS=$(( DISK_LAST - PART_LAST ))
+if (( FREE_SECTORS < SLACK_SECTORS )); then
+    log "only $FREE_SECTORS sectors free behind $DATA_PART (<32 MiB); already grown"
+    exit 0
+fi
+
+FREE_BYTES=$(( FREE_SECTORS * 512 ))
+FREE_HUMAN="$(numfmt --to=iec --suffix=B "$FREE_BYTES" 2>/dev/null || echo "${FREE_BYTES}B")"
+log "growing $DATA_PART on $BOOT_DISK by ~$FREE_HUMAN (PART_LAST=$PART_LAST, DISK_LAST=$DISK_LAST)"
+
+# --- 7. Grow the partition in-place via parted --------------------------
+# We used to delete+recreate with `sgdisk -d/-n` here, but the kernel
+# would not always update /sys/class/block/<part>/size after the recreate
+# (BLKRRPART silently refuses on busy disks even when the partition
+# itself is unmounted, because other partitions of the same disk are in
+# use as the live root). The next ntfsresize then saw the old 256 MB
+# size and refused to grow.
+#
+# `parted resizepart` issues the proper kernel ioctl to update *just*
+# that partition's size, so the rest of the disk stays untouched.
+if ! parted --script "$BOOT_DISK" resizepart "$PART_NUM" 100% 2>&1 \
+        | sed "s/^/[parted] /"; then
+    warn "parted resizepart $PART_NUM failed; partition table may be inconsistent"
+    exit 0
+fi
+
+# Belt-and-braces: ask the kernel to re-scan partition sizes too.
+# `partx -u` updates an existing partition's size in-kernel without
+# requiring an exclusive open of the parent block device.
+partprobe "$BOOT_DISK" 2>/dev/null || true
+partx -u "$BOOT_DISK" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+sleep 1
+
+# Re-resolve the device path after partprobe (it should be the same,
+# but blkid revalidates the label/UUID after the resize).
+DATA_PART="$(blkid -L "$LABEL" 2>/dev/null || echo "$DATA_PART")"
+[[ -b "$DATA_PART" ]] || { warn "$LABEL device disappeared after partprobe"; exit 0; }
+
+# Sanity-check that the kernel actually saw the new size.
+KERNEL_PART_BYTES="$(blockdev --getsize64 "$DATA_PART" 2>/dev/null || echo 0)"
+log "kernel sees $DATA_PART = $(numfmt --to=iec --suffix=B "$KERNEL_PART_BYTES" 2>/dev/null) after resizepart"
+
+# --- 8. Grow the filesystem ----------------------------------------------
+case "$FSTYPE" in
+    ntfs|ntfs3)
+        # ntfsresize without -s grows to fill the partition. Use:
+        #   -ff  first -f bypasses dirty-bit check; second -f bypasses
+        #        the post-resize relocation safety check that otherwise
+        #        prompts for confirmation.
+        #   printf 'y\n' instead of `yes` so there is no SIGPIPE-noise
+        #        in the journal when ntfsresize closes stdin early.
+        # Stderr is mirrored through `sed` so we keep the message in
+        # the unit log if it does fail, instead of swallowing it.
+        if ! ntfsresize --info --force "$DATA_PART" 2>&1 | sed "s/^/[ntfsresize-info] /"; then
+            warn "ntfsresize --info failed on $DATA_PART; aborting grow"
+            exit 0
+        fi
+        if ! printf 'y\n' | ntfsresize -ff --no-progress-bar "$DATA_PART" 2>&1 \
+                | sed "s/^/[ntfsresize] /"; then
+            warn "ntfsresize failed on $DATA_PART; filesystem unchanged"
+            exit 0
+        fi
+        # ntfsresize unconditionally schedules a Windows-side chkdsk by
+        # setting the NTFS "dirty" flag — and the in-tree ntfs3 driver
+        # then refuses to mount the volume ("bad superblock") on Linux,
+        # since they dropped the `-o force` escape hatch. ntfsfix -d
+        # clears that flag so amicachy-persistent-data can mount it.
+        if ! ntfsfix -d "$DATA_PART" 2>&1 | sed "s/^/[ntfsfix] /"; then
+            warn "ntfsfix on $DATA_PART failed; mount may refuse the volume"
+        fi
+        ;;
+    ext2|ext3|ext4)
+        # resize2fs without an explicit size grows to fill the partition.
+        # e2fsck is mandatory first (resize2fs refuses on unchecked FS).
+        e2fsck -fy "$DATA_PART" 2>&1 | sed "s/^/[e2fsck] /" || true
+        if ! resize2fs "$DATA_PART" 2>&1 | sed "s/^/[resize2fs] /"; then
+            warn "resize2fs failed on $DATA_PART; filesystem unchanged"
+            exit 0
+        fi
+        ;;
+esac
+
+log "$LABEL grown to fill $BOOT_DISK"
+exit 0
