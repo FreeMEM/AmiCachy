@@ -1,7 +1,24 @@
 # Base system
 base
 linux-cachyos
+# linux-firmware split (Arch ~2025-Q4) no longer ships GPU/Wi-Fi blobs in the
+# base package — RTX 2000/3000/4000 (Turing/Ampere/Ada) require GSP firmware
+# from linux-firmware-nvidia or nouveau hangs the boot. Enumerate all
+# consumer-hardware splits to restore the old "full" coverage; skip the
+# enterprise-only ones (liquidio/mellanox/nfp/qlogic = fibre/InfiniBand).
 linux-firmware
+linux-firmware-amdgpu
+linux-firmware-atheros
+linux-firmware-broadcom
+linux-firmware-cirrus
+linux-firmware-intel
+linux-firmware-marvell
+linux-firmware-mediatek
+linux-firmware-nvidia
+linux-firmware-other
+linux-firmware-qcom
+linux-firmware-radeon
+linux-firmware-realtek
 mkinitcpio
 mkinitcpio-archiso
 syslinux
@@ -54,7 +71,18 @@ wireplumber
 mesa
 vulkan-radeon
 vulkan-intel
-vulkan-nouveau
+# NVIDIA proprietary stack — kernel module is MIT/GPL (nvidia-open-dkms,
+# Turing+/RTX 20xx+ supported), but nvidia-utils (libGL/libEGL/Vulkan ICD)
+# stays under NVIDIA's EULA — redistribution-clean (LICENSE shipped under
+# /usr/share/licenses/nvidia/). nouveau is masked at boot (cmdline +
+# mkinitcpio) so this driver wins; on systems without an NVIDIA card the
+# package is dead weight (~500 MB) but the iGPU still drives the display.
+# vulkan-nouveau is intentionally absent — it conflicts with the NVIDIA
+# ICD and we have no use for it once nouveau is blacklisted.
+nvidia-open-dkms
+nvidia-utils
+egl-wayland
+libva-nvidia-driver
 vulkan-icd-loader
 intel-media-driver
 xf86-video-amdgpu
