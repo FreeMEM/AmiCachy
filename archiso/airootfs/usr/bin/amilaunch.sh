@@ -111,26 +111,51 @@ export LIBSEAT_BACKEND="logind"
 export WLR_NO_HARDWARE_CURSORS=1
 
 # --- GPU compatibility ---
-# nouveau (the open NVIDIA driver) ships a broken EGL stack on Turing,
-# Ampere and newer (RTX 20xx, 30xx, 40xx). labwc/cage rely on wlroots
-# which talks to EGL; if EGL fails to initialise the user gets a black
-# screen with "Could not initialize EGL" / "unable to create renderer"
-# in the journal and the live ISO never reaches Amiberry.
+# Pick the DRM card that actually has a monitor plugged in, and pin
+# wlroots to it via WLR_DRM_DEVICES. This is what the user means by
+# "use the GPU my screen is connected to" — without it, wlroots
+# enumerates every /dev/dri/card* in order and may bind the iGPU even
+# though the cable is in the dGPU, producing a black screen.
 #
-# Pragmatic fallback: when nouveau is loaded and the user hasn't pinned
-# WLR_RENDERER explicitly, use the wlroots software renderer (pixman).
-# pixman renders on the CPU but draws to whichever DRM output nouveau
-# itself is driving — so the picture comes out of the same physical
-# port the monitor is plugged into, no matter whether that's the dGPU
-# or an iGPU. Slightly slower for the compositor, but Amiberry's own
-# emulation surface is unaffected.
+# Detection reads /sys/class/drm/cardN-*/status which the kernel sets
+# to "connected" for ports with an active link. We prefer the card
+# whose connected output has the largest preferred mode (proxy for
+# "user's main monitor"); ties go to the lowest card number to keep
+# results deterministic across boots.
 #
-# Users with older NVIDIA cards where nouveau's EGL works (Maxwell /
-# Pascal era) can override by exporting WLR_RENDERER=gles2 before
-# launching, or by editing this block.
-if [[ -z "${WLR_RENDERER:-}" ]] && lsmod 2>/dev/null | grep -qE '^nouveau '; then
-    export WLR_RENDERER=pixman
-    echo "AmiCachy: nouveau detected, using pixman software renderer (avoid EGL crash)" >&2
+# Honour any pre-existing WLR_DRM_DEVICES (debug overrides, kiosk
+# setups) by skipping the autodetection.
+if [[ -z "${WLR_DRM_DEVICES:-}" ]]; then
+    _best_card=""
+    _best_area=0
+    for _connector in /sys/class/drm/card*-*; do
+        [[ -r "$_connector/status" ]] || continue
+        [[ "$(<"$_connector/status")" == "connected" ]] || continue
+        # cardN-DP-1 -> cardN
+        _card="${_connector##*/}"
+        _card="${_card%%-*}"
+        # Pick the largest mode advertised for this connector as a
+        # rough "primary monitor" heuristic. Mode lines look like
+        # "1920x1080" so we multiply the two numbers.
+        _area=0
+        if [[ -r "$_connector/modes" ]]; then
+            while IFS= read -r _mode; do
+                [[ "$_mode" =~ ^([0-9]+)x([0-9]+) ]] || continue
+                _candidate=$(( BASH_REMATCH[1] * BASH_REMATCH[2] ))
+                (( _candidate > _area )) && _area=$_candidate
+            done < "$_connector/modes"
+        fi
+        if (( _area > _best_area )) \
+                || { (( _area == _best_area )) && [[ -z "$_best_card" || "$_card" < "$_best_card" ]]; }; then
+            _best_card="$_card"
+            _best_area=$_area
+        fi
+    done
+    if [[ -n "$_best_card" && -e "/dev/dri/$_best_card" ]]; then
+        export WLR_DRM_DEVICES="/dev/dri/$_best_card"
+        echo "AmiCachy: WLR_DRM_DEVICES=$WLR_DRM_DEVICES (active connector on $_best_card)" >&2
+    fi
+    unset _best_card _best_area _connector _card _area _candidate _mode
 fi
 
 # sdl2-compat debug (CachyOS ships sdl2-compat over real SDL2)
