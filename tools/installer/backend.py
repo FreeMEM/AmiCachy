@@ -453,13 +453,22 @@ def configure_system(runner: CommandRunner) -> None:
             "session    optional   pam_systemd.so\n",
         )
 
-    # Scripts: amilaunch.sh, start_dev_env.sh
+    # Scripts: amilaunch.sh, start_dev_env.sh — these live only in
+    # archiso/airootfs/usr/bin/ (no pacman package ships them) and were never
+    # bundled into INSTALLER_DATA_DIR, so the old src path silently missed
+    # the copy and the chmod then failed against a non-existent target file.
+    # Read from /usr/bin/ on the live system, where they are guaranteed to be.
     for script in ("amilaunch.sh", "start_dev_env.sh"):
-        src = f"{INSTALLER_DATA_DIR}/{script}"
+        src = f"/usr/bin/{script}"
         dest = f"{mnt}/usr/bin/{script}"
         if Path(src).exists():
             shutil.copy2(src, dest)
-        runner.run_chroot(["chmod", "+x", f"/usr/bin/{script}"])
+            runner.run_chroot(["chmod", "+x", f"/usr/bin/{script}"])
+        else:
+            raise InstallError(
+                f"Required script {src} missing from live system",
+                step="configure_system",
+            )
 
     # UAE configs
     uae_dest = f"{mnt}/usr/share/amicachy/uae"
