@@ -496,6 +496,36 @@ def configure_system(runner: CommandRunner) -> None:
     # Enable NetworkManager
     runner.run_chroot(["systemctl", "enable", "NetworkManager"])
 
+    # CPU performance governor for emulation profiles. The unit gates itself
+    # on ConditionKernelCommandLine=amiprofile and the helper script filters
+    # to classic_68k / ppc_nitro only, so dev_station and asset_manager keep
+    # the kernel default governor.
+    cpufreq_src = "/usr/bin/amicachy-cpufreq-set"
+    if Path(cpufreq_src).exists():
+        shutil.copy2(cpufreq_src, f"{mnt}/usr/bin/amicachy-cpufreq-set")
+        runner.run_chroot(["chmod", "+x", "/usr/bin/amicachy-cpufreq-set"])
+    _write_file(
+        f"{mnt}/etc/systemd/system/amicachy-performance.service",
+        "[Unit]\n"
+        "Description=AmiCachy: set performance cpufreq governor for emulation profiles\n"
+        "DefaultDependencies=yes\n"
+        "After=local-fs.target\n"
+        "ConditionKernelCommandLine=amiprofile\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        "ExecStart=/usr/bin/amicachy-cpufreq-set\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n",
+    )
+    perf_wants_dir = f"{mnt}/etc/systemd/system/multi-user.target.wants"
+    Path(perf_wants_dir).mkdir(parents=True, exist_ok=True)
+    perf_link = Path(f"{perf_wants_dir}/amicachy-performance.service")
+    if not perf_link.exists():
+        perf_link.symlink_to("/etc/systemd/system/amicachy-performance.service")
+
     # Plymouth boot splash
     plymouth_theme = f"{mnt}/usr/share/plymouth/themes/amicachy"
     plymouth_src = "/usr/share/plymouth/themes/amicachy"

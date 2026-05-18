@@ -333,7 +333,9 @@ run_emulator() {
     if [[ "$config" == *.fs-uae ]]; then
         run_fsuae "$config"
     else
-        run_amiberry "$config"
+        # SCHED_FIFO 52 keeps the emulation thread above CFS/BORE jitter and
+        # below PipeWire's default RT range (88-95), matching ppc_nitro.
+        run_amiberry "$config" rt
     fi
 }
 

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Apply the `performance` cpufreq governor when the active amiprofile is an
+# emulation target (classic_68k or ppc_nitro). Other profiles (dev_station,
+# asset_manager, installer) are left on the kernel default — usually schedutil —
+# so a dev workstation does not burn idle power.
+#
+# Why performance and not schedutil/ondemand for emulation:
+#   Amiberry/QEMU sleep on vsync and audio buffers, so they look "idle" to the
+#   on-demand governors. The governor then drops frequency just before the next
+#   frame burst, adding a few ms of wake-up latency that show up as input lag.
+#   `performance` pins the highest non-boost P-state and removes that jitter.
+
+set -u
+
+cmdline="$(< /proc/cmdline)"
+profile=""
+for tok in $cmdline; do
+    if [[ "$tok" == amiprofile=* ]]; then
+        profile="${tok#amiprofile=}"
+    fi
+done
+
+case "$profile" in
+    classic_68k|ppc_nitro) ;;
+    *) exit 0 ;;
+esac
+
+shopt -s nullglob
+applied=0
+for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    avail="${gov%/scaling_governor}/scaling_available_governors"
+    if [[ -r "$avail" ]] && grep -qw performance "$avail"; then
+        echo performance > "$gov" 2>/dev/null && applied=$((applied + 1))
+    fi
+done
+
+if [[ $applied -eq 0 ]]; then
+    echo "amicachy-cpufreq-set: no cpufreq governor available (intel_pstate active?)" >&2
+fi
+exit 0

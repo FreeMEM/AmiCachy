@@ -1,0 +1,16 @@
+[Unit]
+Description=AmiCachy: set performance cpufreq governor for emulation profiles
+DefaultDependencies=yes
+After=local-fs.target
+# Cheap early bail-out for profiles that don't need it. The script itself
+# also checks /proc/cmdline, but ConditionKernelCommandLine= lets systemd
+# skip activation entirely on dev_station / asset_manager / installer boots.
+ConditionKernelCommandLine=amiprofile
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-cpufreq-set
+
+[Install]
+WantedBy=multi-user.target
