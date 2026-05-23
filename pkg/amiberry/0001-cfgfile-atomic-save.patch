@@ -1,8 +1,203 @@
 diff --git a/src/cfgfile.cpp b/src/cfgfile.cpp
-index e6f0c27..50bdffc 100644
+index 737f6efa..83530363 100644
 --- a/src/cfgfile.cpp
 +++ b/src/cfgfile.cpp
-@@ -7633,10 +7633,150 @@ void cfgfile_backup(const TCHAR *path)
+@@ -49,6 +49,7 @@
+ #include "amiberry_input.h"
+ #ifndef _WIN32
+ #include <arpa/inet.h>
++#include <sys/stat.h>
+ #else
+ /* MinGW: need inet_addr/inet_ntoa and struct in_addr for SLIRP IP config.
+    Cannot include <winsock2.h> here as it conflicts with Amiberry's SOCKET typedef.
+@@ -789,6 +790,49 @@ static TCHAR *cfgfile_put_multipath (struct multipath *mp, const TCHAR *s)
+ 	return my_strdup (s);
+ }
+ 
++#ifdef AMIBERRY
++static bool cfgfile_multipath_entry_matches(const TCHAR *path1, const TCHAR *path2)
++{
++	if (!path1[0] || !path2[0])
++		return false;
++
++	TCHAR tmp1[MAX_DPATH], tmp2[MAX_DPATH];
++	_tcsncpy(tmp1, path1, MAX_DPATH - 1);
++	tmp1[MAX_DPATH - 1] = 0;
++	_tcsncpy(tmp2, path2, MAX_DPATH - 1);
++	tmp2[MAX_DPATH - 1] = 0;
++
++	fix_trailing(tmp1);
++	fix_trailing(tmp2);
++
++#ifdef _WIN32
++	for (TCHAR *p = tmp1; *p; p++) {
++		if (*p == '\\')
++			*p = '/';
++	}
++	for (TCHAR *p = tmp2; *p; p++) {
++		if (*p == '\\')
++			*p = '/';
++	}
++#endif
++
++#if defined(_WIN32) || defined(__APPLE__)
++	return _tcsicmp(tmp1, tmp2) == 0;
++#else
++	return _tcscmp(tmp1, tmp2) == 0;
++#endif
++}
++
++static bool cfgfile_multipath_contains_entry(const struct multipath *mp, const TCHAR *path, int entries)
++{
++	for (int i = 0; i < entries; i++) {
++		if (cfgfile_multipath_entry_matches(mp->path[i], path))
++			return true;
++	}
++	return false;
++}
++#endif
++
+ 
+ static TCHAR *cfgfile_subst_path_load (const TCHAR *path, struct multipath *mp, const TCHAR *file, bool dir)
+ {
+@@ -1103,6 +1147,11 @@ void cfgfile_target_dwrite_escape(struct zfile *f, const TCHAR *option, const TC
+ 
+ static void cfgfile_write_rom (struct zfile *f, struct multipath *mp, const TCHAR *romfile, const TCHAR *name)
+ {
++#ifdef AMIBERRY
++	if (!romfile || !romfile[0])
++		return;
++#endif
++
+ 	TCHAR *str = cfgfile_subst_path (mp->path[0], UNEXPANDED, romfile);
+ 	str = cfgfile_put_multipath (mp, str);
+ 	cfgfile_write_str (f, name, str);
+@@ -1165,6 +1214,16 @@ static void cfgfile_dwrite_path (struct zfile *f, struct multipath *mp, const TC
+ 	xfree (s);
+ }
+ 
++#ifdef AMIBERRY
++static void cfgfile_write_multipath(struct zfile *f, const TCHAR *option, const struct multipath *mp)
++{
++	for (int i = 0; i < MAX_PATHS; i++) {
++		if (mp->path[i][0] && !cfgfile_multipath_contains_entry(mp, mp->path[i], i))
++			cfgfile_write_str(f, option, mp->path[i]);
++	}
++}
++#endif
++
+ static void cfgfile_write_multichoice(struct zfile *f, const TCHAR *option, const TCHAR *table[], int value)
+ {
+ 	TCHAR tmp[MAX_DPATH];
+@@ -2056,6 +2115,16 @@ void cfgfile_save_options (struct zfile *f, struct uae_prefs *p, int type)
+ 		}
+ 	}
+ 
++#ifdef AMIBERRY
++	_sntprintf(tmp, sizeof tmp, _T("%s.rom_path"), TARGET_NAME);
++	cfgfile_write_multipath(f, tmp, &p->path_rom);
++	_sntprintf(tmp, sizeof tmp, _T("%s.floppy_path"), TARGET_NAME);
++	cfgfile_write_multipath(f, tmp, &p->path_floppy);
++	_sntprintf(tmp, sizeof tmp, _T("%s.hardfile_path"), TARGET_NAME);
++	cfgfile_write_multipath(f, tmp, &p->path_hardfile);
++	_sntprintf(tmp, sizeof tmp, _T("%s.cd_path"), TARGET_NAME);
++	cfgfile_write_multipath(f, tmp, &p->path_cd);
++#else
+ 	for (i = 0; i < MAX_PATHS; i++) {
+ 		if (p->path_rom.path[i][0]) {
+ 			_sntprintf (tmp, sizeof tmp, _T("%s.rom_path"), TARGET_NAME);
+@@ -2080,6 +2149,7 @@ void cfgfile_save_options (struct zfile *f, struct uae_prefs *p, int type)
+ 			cfgfile_write_str (f, tmp, p->path_cd.path[i]);
+ 		}
+ 	}
++#endif
+ 
+ 	cfg_write (_T("; host-specific"), f);
+ 
+@@ -2468,17 +2538,17 @@ void cfgfile_save_options (struct zfile *f, struct uae_prefs *p, int type)
+ 		if (!p->gfx_monitor[i].enabled)
+ 			continue;
+ 		TCHAR tmp[256];
+-		_stprintf(tmp, _T("gfx_monitor%d_display"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_display"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_display);
+-		_stprintf(tmp, _T("gfx_monitor%d_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_fullscreen"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_fullscreen);
+-		_stprintf(tmp, _T("gfx_monitor%d_width_windowed"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_width_windowed"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_size_win.width);
+-		_stprintf(tmp, _T("gfx_monitor%d_height_windowed"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_height_windowed"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_size_win.height);
+-		_stprintf(tmp, _T("gfx_monitor%d_width_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_width_fullscreen"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_size_fs.width);
+-		_stprintf(tmp, _T("gfx_monitor%d_height_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_height_fullscreen"), i);
+ 		cfgfile_write(f, tmp, _T("%d"), p->gfx_monitor[i].gfx_size_fs.height);
+ 	}
+ 
+@@ -3398,6 +3468,19 @@ static int cfgfile_multipath (const TCHAR *option, const TCHAR *value, const TCH
+ 	TCHAR tmploc[MAX_DPATH];
+ 	if (!cfgfile_string (option, value, name, tmploc, MAX_DPATH))
+ 		return 0;
++#ifdef AMIBERRY
++	const auto s = target_expand_environment (tmploc, nullptr, 0);
++	_tcsncpy (tmploc, s, MAX_DPATH - 1);
++	tmploc[MAX_DPATH - 1] = 0;
++	fix_trailing (tmploc);
++	xfree (s);
++	if (cfgfile_multipath_contains_entry(mp, tmploc, MAX_PATHS))
++		return 1;
++	for (int i = 0; i < MAX_PATHS; i++) {
++		if (mp->path[i][0] == 0 || (i == 0 && (!_tcscmp (mp->path[i], _T(".\\")) || !_tcscmp (mp->path[i], _T("./"))))) {
++			_tcsncpy (mp->path[i], tmploc, MAX_DPATH - 1);
++			mp->path[i][MAX_DPATH - 1] = 0;
++#else
+ 	for (int i = 0; i < MAX_PATHS; i++) {
+ 		if (mp->path[i][0] == 0 || (i == 0 && (!_tcscmp (mp->path[i], _T(".\\")) || !_tcscmp (mp->path[i], _T("./"))))) {
+ 			const auto s = target_expand_environment (tmploc, nullptr, 0);
+@@ -3405,6 +3488,7 @@ static int cfgfile_multipath (const TCHAR *option, const TCHAR *value, const TCH
+ 			mp->path[i][MAX_DPATH - 1] = 0;
+ 			fix_trailing (mp->path[i]);
+ 			xfree (s);
++#endif
+ 			//target_multipath_modified(p);
+ 			return 1;
+ 		}
+@@ -4078,24 +4162,24 @@ static int cfgfile_parse_host (struct uae_prefs *p, TCHAR *option, TCHAR *value)
+ 
+ 	for (int i = 1; i < MAX_AMIGADISPLAYS; i++) {
+ 		TCHAR tmp[256];
+-		_stprintf(tmp, _T("gfx_monitor%d_display"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_display"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_display, 1)) {
+ 			p->gfx_monitor[i].enabled = true;
+ 			return 1;
+ 		}
+-		_stprintf(tmp, _T("gfx_monitor%d_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_fullscreen"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_fullscreen, 1))
+ 			return 1;
+-		_stprintf(tmp, _T("gfx_monitor%d_width_windowed"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_width_windowed"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_size_win.width, 1))
+ 			return 1;
+-		_stprintf(tmp, _T("gfx_monitor%d_height_windowed"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_height_windowed"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_size_win.height, 1))
+ 			return 1;
+-		_stprintf(tmp, _T("gfx_monitor%d_width_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_width_fullscreen"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_size_fs.width, 1))
+ 			return 1;
+-		_stprintf(tmp, _T("gfx_monitor%d_height_fullscreen"), i);
++		_sntprintf(tmp, sizeof tmp / sizeof(TCHAR), _T("gfx_monitor%d_height_fullscreen"), i);
+ 		if (cfgfile_intval(option, value, tmp, &p->gfx_monitor[i].gfx_size_fs.height, 1))
+ 			return 1;
+ 	}
+@@ -7550,10 +7634,173 @@ void cfgfile_backup(const TCHAR *path)
  int cfgfile_save (struct uae_prefs *p, const TCHAR *filename, int type)
  {
  	struct zfile *fh;
@@ -52,12 +247,23 @@ index e6f0c27..50bdffc 100644
 +		return 0;
 +	}
 +
++	/* Preserve the existing config's mode so a private 0600 file does not
++	 * become world-readable after save. fchmod() bypasses umask. */
++	struct stat old_st;
++	const bool have_old_mode = (stat (filename, &old_st) == 0);
++
 +	int wfd = open (tmpname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 +	if (wfd < 0) {
 +		write_log (_T("cfgfile_save: open('%s') for writing failed: %s\n"),
 +			tmpname, strerror (errno));
 +		zfile_fclose (fh);
 +		return 0;
++	}
++	if (have_old_mode) {
++		if (fchmod (wfd, old_st.st_mode & 07777) != 0) {
++			write_log (_T("cfgfile_save: fchmod '%s' to 0%o failed: %s (continuing)\n"),
++				tmpname, (unsigned) (old_st.st_mode & 07777), strerror (errno));
++		}
 +	}
 +
 +	size_t written = 0;
@@ -69,7 +275,7 @@ index e6f0c27..50bdffc 100644
 +			write_log (_T("cfgfile_save: write to '%s' failed at %zu/%zu bytes: %s\n"),
 +				tmpname, written, buflen, strerror (errno));
 +			close (wfd);
-+			my_unlink (tmpname);
++			unlink (tmpname);
 +			zfile_fclose (fh);
 +			return 0;
 +		}
@@ -77,7 +283,7 @@ index e6f0c27..50bdffc 100644
 +			write_log (_T("cfgfile_save: write to '%s' returned 0 at %zu/%zu bytes (no space?)\n"),
 +				tmpname, written, buflen);
 +			close (wfd);
-+			my_unlink (tmpname);
++			unlink (tmpname);
 +			zfile_fclose (fh);
 +			return 0;
 +		}
@@ -91,13 +297,13 @@ index e6f0c27..50bdffc 100644
 +		write_log (_T("cfgfile_save: fsync of '%s' failed: %s\n"),
 +			tmpname, strerror (errno));
 +		close (wfd);
-+		my_unlink (tmpname);
++		unlink (tmpname);
 +		return 0;
 +	}
 +	if (close (wfd) != 0) {
 +		write_log (_T("cfgfile_save: close of '%s' failed: %s\n"),
 +			tmpname, strerror (errno));
-+		my_unlink (tmpname);
++		unlink (tmpname);
 +		return 0;
 +	}
 +
@@ -125,23 +331,35 @@ index e6f0c27..50bdffc 100644
 +	{
 +		TCHAR backup[MAX_DPATH];
 +		_sntprintf (backup, MAX_DPATH, _T("%s/configuration.backup"), dirpath);
-+		my_unlink (backup);
++		unlink (backup);
 +		(void) link (filename, backup);
 +	}
 +
-+	if (my_rename (tmpname, filename) != 0) {
++	if (rename (tmpname, filename) != 0) {
 +		write_log (_T("cfgfile_save: rename '%s' -> '%s' failed: %s\n"),
 +			tmpname, filename, strerror (errno));
-+		my_unlink (tmpname);
++		unlink (tmpname);
 +		return 0;
 +	}
  
-+	/* fsync the parent directory so the rename itself is durable. */
++	/* fsync the parent directory so the rename itself is durable. The save
++	 * has already succeeded at this point (rename(2) is atomic and the file
++	 * is visible), so any failure here is a durability warning, not a save
++	 * failure — we log it but still return success. */
 +	{
 +		int dfd = open (dirpath, O_RDONLY | O_DIRECTORY);
-+		if (dfd >= 0) {
-+			(void) fsync (dfd);
-+			close (dfd);
++		if (dfd < 0) {
++			write_log (_T("cfgfile_save: open dir '%s' for fsync failed: %s — save succeeded but durability not guaranteed\n"),
++				dirpath, strerror (errno));
++		} else {
++			if (fsync (dfd) != 0) {
++				write_log (_T("cfgfile_save: fsync of dir '%s' failed: %s — save succeeded but durability not guaranteed\n"),
++					dirpath, strerror (errno));
++			}
++			if (close (dfd) != 0) {
++				write_log (_T("cfgfile_save: close of dir '%s' failed: %s\n"),
++					dirpath, strerror (errno));
++			}
 +		}
 +	}
 +
@@ -154,7 +372,7 @@ index e6f0c27..50bdffc 100644
  	fh = zfile_fopen (filename, _T("w"), ZFD_NORMAL);
  #else
  	fh = zfile_fopen (filename, _T("w, ccs=UTF-8"), ZFD_NORMAL);
-@@ -7651,6 +7791,7 @@ int cfgfile_save (struct uae_prefs *p, const TCHAR *filename, int type)
+@@ -7568,6 +7815,7 @@ int cfgfile_save (struct uae_prefs *p, const TCHAR *filename, int type)
  	cfgfile_save_options (fh, p, type);
  	zfile_fclose (fh);
  	return 1;
@@ -162,3 +380,13 @@ index e6f0c27..50bdffc 100644
  }
  
  struct uae_prefs *cfgfile_open(const TCHAR *filename, int *type)
+@@ -8888,6 +9136,9 @@ void default_prefs (struct uae_prefs *p, bool reset, int type)
+ 
+ 	p->rtg_horiz_zoom_mult = 1.0;
+ 	p->rtg_vert_zoom_mult = 1.0;
++#ifdef AMIBERRY
++	p->rtg_zerocopy = true;
++#endif
+ 
+ 	_tcscpy (p->floppyslots[0].df, _T(""));
+ 	_tcscpy (p->floppyslots[1].df, _T(""));
