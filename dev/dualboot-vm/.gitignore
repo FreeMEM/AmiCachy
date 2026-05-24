@@ -11,6 +11,9 @@ logs/*.sock
 # OVMF VARS templates: keep the template, ignore per-run copies
 ovmf/OVMF_VARS-run-*.4m.fd
 
+# Installer ISOs downloaded by build-baseline-*.sh (multi-GB, fetched on demand)
+.cache/
+
 # Keep directory structure even when empty
 !baselines/.gitkeep
 !overlays/.gitkeep
