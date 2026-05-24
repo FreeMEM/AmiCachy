@@ -1,0 +1,17 @@
+# All test artifacts are local-only — never commit
+baselines/*.qcow2
+baselines/*.img
+overlays/*.qcow2
+overlays/*.fd
+logs/*.log
+logs/*.serial
+logs/*.monitor
+logs/*.sock
+
+# OVMF VARS templates: keep the template, ignore per-run copies
+ovmf/OVMF_VARS-run-*.4m.fd
+
+# Keep directory structure even when empty
+!baselines/.gitkeep
+!overlays/.gitkeep
+!logs/.gitkeep
