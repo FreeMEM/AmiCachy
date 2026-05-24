@@ -24,7 +24,6 @@ file_permissions=(
   ["/etc/sudoers.d/amiga"]="0:0:440"
   ["/usr/bin/amilaunch.sh"]="0:0:755"
   ["/usr/bin/amicachy-amiberry-session"]="0:0:755"
-  ["/usr/bin/amicachy-copy-roms"]="0:0:755"
   ["/usr/bin/amicachy-earlystartup"]="0:0:755"
   ["/usr/bin/amicachy-fetch-asset"]="0:0:755"
   ["/usr/bin/amicachy-fix-mac-boot"]="0:0:755"

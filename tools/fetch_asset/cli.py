@@ -216,7 +216,7 @@ def cmd_add_url(args) -> int:
 
 
 def cmd_add_file(args) -> int:
-    """Manual install from a local file path (.zip or .hdf raw)."""
+    """Manual install from a local file path (.zip, .hdf raw, or Kickstart .rom/.key/.bin)."""
     if not args.accept_responsibility:
         print()
         print("== Manual asset install ==")
@@ -342,9 +342,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_file = sub.add_parser(
         "add-file",
-        help="Install a custom .zip or .hdf from a local file path.",
+        help="Install a custom .zip, .hdf, or Kickstart ROM (.rom/.key/.bin) from a local file path.",
     )
-    p_file.add_argument("path", help="Local path (e.g. /run/media/amiga/USB/x.zip).")
+    p_file.add_argument("path", help="Local path (e.g. /run/media/amiga/USB/kick31.rom).")
     p_file.add_argument(
         "--name",
         default="",

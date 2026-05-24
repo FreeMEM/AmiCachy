@@ -534,7 +534,11 @@ def uninstall_asset(asset_id: str) -> None:
     if record is None:
         return
     path = Path(record["path"])
-    if path.exists():
+    # Kickstart ROMs are flat files under a shared dir; UAE/zip assets live
+    # in their own asset dir. rmtree on a shared dir would wipe siblings.
+    if path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.exists():
         shutil.rmtree(path, ignore_errors=True)
     conf_dir = Path.home() / "Amiberry" / "conf"
     (conf_dir / f"amicachy-{asset_id}.uae").unlink(missing_ok=True)
@@ -584,8 +588,8 @@ def install_from_url(
     against it. If omitted, the sha256 is computed and stored in the
     user catalog so subsequent reinstalls can detect upstream changes.
 
-    Currently supports format=zip only. Local files / .hdf raw / .rom
-    will be added in the next phases.
+    Only .zip archives are supported for URL installs. For .hdf hardfiles
+    and Kickstart ROMs use 'Add from local file' (install_from_file).
     """
     if not url:
         raise InstallError("URL is required.")
@@ -595,8 +599,9 @@ def install_from_url(
     fname = _filename_from_url(url)
     if not fname.lower().endswith(".zip"):
         raise InstallError(
-            "Only .zip archives are supported for URL installs in this version. "
-            "Local file support (.hdf, .rom) is coming next."
+            "Only .zip archives are supported for URL installs. "
+            "For .hdf hardfiles or Kickstart ROMs (.rom/.key/.bin), "
+            "use 'Add from local file' instead."
         )
 
     display_name = name.strip() or fname
@@ -716,15 +721,17 @@ def _looks_like_hdf(path: Path) -> bool:
 
 
 def _detect_local_format(path: Path) -> str:
-    """Return 'zip' or 'hdf' from filename. Anything else raises."""
+    """Return 'zip', 'hdf' or 'rom' from filename. Anything else raises."""
     suffix = path.suffix.lower()
     if suffix == ".zip":
         return "zip"
     if suffix == ".hdf":
         return "hdf"
+    if suffix in (".rom", ".key", ".bin"):
+        return "rom"
     raise InstallError(
         f"Unsupported file extension '{suffix}'. "
-        f"Phase 2 supports only .zip and .hdf — .rom and .adf land in phase 3."
+        f"Supported: .zip, .hdf, .rom, .key, .bin."
     )
 
 
@@ -754,11 +761,16 @@ def install_from_file(
     base_profile_id: str,
     progress_cb: Callable[[str, int, int], None] | None = None,
 ) -> Asset:
-    """Manual install from a local file path (zip or hdf raw).
+    """Manual install from a local file path (zip, hdf raw, or Kickstart rom/key/bin).
 
     Mirrors install_from_url() but the source is on the filesystem
     (typically a USB pendrive automounted under /run/media/$USER, or
     a file in the user's home).
+
+    Kickstart files (.rom/.key/.bin) are copied flat into ~/Amiberry/roms/
+    so Amiberry's ROM scanner picks them up alongside the seeded and
+    host-linked ones; base_profile_id is accepted for API parity with
+    .zip/.hdf flows but ignored — no UAE config is generated.
 
     Caller MUST have collected the user's responsibility-acceptance
     BEFORE calling this — no upstream license to display.
@@ -778,8 +790,19 @@ def install_from_file(
     display_name = name.strip() or src.stem
     asset_id = f"manual-{_slugify(display_name)}"
 
-    template = presets.get_preset(base_profile_id)
-    extract_to = _expand(f"~/Amiberry/harddrives/{asset_id}")
+    if fmt == "rom":
+        # install_path points at the file itself, not a containing dir —
+        # uninstall_asset must unlink, never rmtree (would wipe siblings).
+        install_path = _expand("~/Amiberry/roms") / src.name
+        install_spec = {"layout": "kickstart-rom", "rom_file": str(install_path)}
+    else:
+        install_path = _expand(f"~/Amiberry/harddrives/{asset_id}")
+        template = presets.get_preset(base_profile_id)
+        install_spec = {
+            "extract_to": str(install_path),
+            "auto_detect_hdf": template is not None,
+            "uae_template": template or {},
+        }
 
     asset = Asset(
         id=asset_id,
@@ -797,42 +820,39 @@ def install_from_file(
         sha256="",
         size_bytes=src.stat().st_size,
         format=fmt,
-        install={
-            "extract_to": str(extract_to),
-            "auto_detect_hdf": template is not None,
-            "uae_template": template or {},
-        },
+        install=install_spec,
         version="",
         source="user",
     )
 
     state.mark_accepted(asset.id)
 
-    extract_to.mkdir(parents=True, exist_ok=True)
-
     if fmt == "zip":
-        # Reuse the same safe-extract pipeline as the catalog flow.
-        # We hash from the source file, not a copy in cache, so a 4 GB
-        # HDF inside a zip doesn't get duplicated to disk.
+        install_path.mkdir(parents=True, exist_ok=True)
+        # Hash from the source — avoids duplicating a 4 GB inner HDF to disk.
         asset.sha256 = _hash_file(src, progress_cb=progress_cb)
-        extract(src, extract_to, "zip", progress_cb=progress_cb)
-    else:  # fmt == "hdf"
-        # Raw HDF: copy into the asset dir so uninstall can rmtree
-        # cleanly without touching the user's source media.
-        dst = extract_to / src.name
+        extract(src, install_path, "zip", progress_cb=progress_cb)
+    elif fmt == "hdf":
+        install_path.mkdir(parents=True, exist_ok=True)
+        dst = install_path / src.name
         _copy_with_progress(src, dst, progress_cb=progress_cb)
-        # Hash the destination — covers cases where the source was on
-        # a flaky USB and the copy diverged.
+        # Hash the destination — covers cases where the source media was
+        # flaky and the copy diverged.
         asset.sha256 = _hash_file(dst, progress_cb=progress_cb)
+    else:  # fmt == "rom"
+        install_path.parent.mkdir(parents=True, exist_ok=True)
+        _copy_with_progress(src, install_path, progress_cb=progress_cb)
+        asset.sha256 = _hash_file(install_path, progress_cb=progress_cb)
 
-    if progress_cb is not None:
-        progress_cb(STAGE_REGISTER, 0, 1)
-    register_uae(asset, extract_to)
-    if progress_cb is not None:
-        progress_cb(STAGE_REGISTER, 1, 1)
+    if fmt != "rom":
+        if progress_cb is not None:
+            progress_cb(STAGE_REGISTER, 0, 1)
+        register_uae(asset, install_path)
+        if progress_cb is not None:
+            progress_cb(STAGE_REGISTER, 1, 1)
 
     _catalog.save_user_asset(asset)
-    state.mark_installed(asset.id, str(extract_to), sha256=asset.sha256)
+    state.mark_installed(asset.id, str(install_path), sha256=asset.sha256)
 
     return asset
 

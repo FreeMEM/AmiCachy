@@ -226,7 +226,7 @@ class URLAssetDialog(QDialog):
 
 
 class FileAssetDialog(QDialog):
-    """Manual install from a local file (zip or hdf raw).
+    """Manual install from a local file (zip, hdf raw, or Kickstart rom/key/bin).
 
     Discovers USB pendrives automounted by udisks2 under /run/media/$USER
     and surfaces them as one-click shortcuts. Falls back to a regular
@@ -252,8 +252,9 @@ class FileAssetDialog(QDialog):
         layout.addWidget(title)
 
         layout.addWidget(QLabel(
-            "Pick a .zip bundle or a raw .hdf hardfile. Pendrives auto-mounted "
-            "by the system appear below; otherwise use 'Browse…'."
+            "Pick a .zip bundle, a raw .hdf hardfile, or a Kickstart ROM "
+            "(.rom/.key/.bin). Pendrives auto-mounted by the system appear "
+            "below; otherwise use 'Browse…'."
         ))
 
         # USB shortcuts list (collapsible-feeling — hidden if empty).
@@ -358,7 +359,9 @@ class FileAssetDialog(QDialog):
             self,
             "Select asset file",
             root,
-            "Asset files (*.zip *.hdf);;Zip archives (*.zip);;Hardfiles (*.hdf);;All files (*)",
+            "Asset files (*.zip *.hdf *.rom *.key *.bin);;"
+            "Zip archives (*.zip);;Hardfiles (*.hdf);;"
+            "Kickstart ROMs (*.rom *.key *.bin);;All files (*)",
         )
         if not path:
             return

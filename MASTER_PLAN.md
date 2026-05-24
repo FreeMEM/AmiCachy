@@ -36,5 +36,5 @@ esac
 
 ## 5. Deuda técnica
 
-- **Unificar `amicachy-copy-roms` con el Asset Manager.** Hoy hay dos rutas para que el usuario aporte ficheros propios: el botón "Add asset → From local file" del Asset Manager (acepta `.zip` y `.hdf`) y el script TUI `amicachy-copy-roms` (acepta `.rom`/`.key`/`.bin` y los copia a `~/Amiberry/roms/`). Cuando el Asset Manager gane una entrada para Kickstart ROMs locales, retirar el script y dejar todo el flujo "el usuario aporta archivos" en una sola UI.
+_(Sin deuda activa.)_
 
