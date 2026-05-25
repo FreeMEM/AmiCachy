@@ -46,12 +46,12 @@ El instalador PySide6 actual (`tools/installer/backend.py` línea 281) hace `wip
 | ID | Fase | Estado | Notas |
 |---|---|---|---|
 | F1 | Inventario de migración Calamares | ✅ COMPLETADO | Entregable: `docs/calamares-migration-inventory.md` (515 líneas, ya escrito) |
-| F2.a | Scaffolding VM dualboot | ✅ COMPLETADO | Entregable: `dev/dualboot-vm/` (ver siguiente sección). Smoke test E2E PENDIENTE |
-| F2.b | Baseline Debian 12 (ext4 + GRUB) | ⏳ pendiente | Script `build-baseline-debian.sh` con preseed |
-| F2.c | Baseline Windows 11 (NTFS + ESP) | ⏳ pendiente | Script `build-baseline-windows.sh` con autounattend.xml |
+| F2.a | Scaffolding VM dualboot | ✅ COMPLETADO (2026-05-23) | Entregable: `dev/dualboot-vm/`. Smoke test E2E con ISO live: pasa |
+| F2.b | Baseline Debian (ext4 + GRUB-EFI) | ✅ COMPLETADO (2026-05-24) | Entregable: `baselines/debian12-ext4-grub.qcow2` (~1.8 GB, Debian 13.5.0 — el slot mantiene el nombre "debian12" por historia). Build automatizado en ~3 min con `scripts/build-baseline-debian.sh` (~700 MB ISO cacheada). Smoke test standalone: boot E2E hasta login prompt OK |
+| F2.c | Baseline Windows 11 (NTFS + ESP) | ✅ COMPLETADO (2026-05-24) | Entregable: `baselines/win11-ntfs.qcow2` (~13 GB, Win11 25H2 Spanish, cuenta tester/tester). Build **semi-manual**: `scripts/build-baseline-windows.sh` automatiza descarga/virtio/remaster ISO no-prompt + fases specialize/oobeSystem, pero 25H2 (SetupPrep.exe nuevo) ignora autounattend en la fase windowsPE → ~5 clicks manuales en clave/edición/partición. Ver [[project_win11_baseline_autounattend]] |
 | F3.0 | Paquete `amicachy-base` | ⏳ pendiente | **Bloquea F3**. Empaquetar todo lo que hoy escribe `configure_system()` |
 | F3 | Esqueleto Calamares (happy path T1) | 🔒 bloqueada por F1, F2.a, F3.0 | Paquete `pkg/calamares-config-amicachy/` + módulos estándar + cambio de autostart live |
-| F4 | Dual-boot real (T2, T3) | 🔒 bloqueada por F2.b, F2.c, F3 | Módulos custom `amicachy-foreign-os`, `amicachy-preflight`, `amicachy-postinstall.profiles` |
+| F4 | Dual-boot real (T2, T3) | 🔒 bloqueada solo por F3 (F2.b/F2.c ✅) | Módulos custom `amicachy-foreign-os`, `amicachy-preflight`, `amicachy-postinstall.profiles`. Baselines Debian+Win11 ya disponibles para overlays |
 | F5 | Branding Workbench/Amiga | ⏳ pendiente, paralelizable | QML branding + slideshow (port de `slideshow.py`) |
 | F6 | Módulos AmiCachy custom | 🔒 bloqueada por F3 | `amicachy-hardware`, `amicachy-profiles`, `amicachy-addons` (QML) + `amicachy-postinstall` (Python) |
 | F7 | Matriz completa T1–T6 | 🔒 bloqueada por F4, F6 | Validar con `verify-untouched.sh` |
