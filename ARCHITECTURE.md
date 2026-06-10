@@ -47,3 +47,10 @@ A specialized profile designed for my custom language (Transpiler -> C -> Amiga 
 2. **Task 2:** Script `hardware_audit.py` (PySide6) for benchmarking.
 3. **Task 3:** Script `amilaunch.sh` to handle profile-based booting.
 4. **Task 4:** Configure Labwc environment for the Dev Station.
+
+## 8. Future Direction: AmiCachy-HLE
+A planned native boot mode that reimplements the AmigaOS API contract in Rust
+(High-Level Emulation) on top of the Musashi 68k core, with its own
+Smithay-based compositor, instead of full hardware emulation. See
+[`MASTER_PLAN.md` §5](MASTER_PLAN.md) and the engineering docs in
+[`docs/hle/`](docs/hle/README.md).

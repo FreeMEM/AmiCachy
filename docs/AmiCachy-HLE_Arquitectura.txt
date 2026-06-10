@@ -1,0 +1,1436 @@
+==================================================================
+AMICACHY-HLE - NOTAS DE ARQUITECTURA
+Modo de arranque nativo: AmigaOS API reimplementada en Rust + Musashi
+==================================================================
+
+------------------------------------------------------------------
+1. CONCEPTO GENERAL
+------------------------------------------------------------------
+
+AmiCachy-HLE es un modo de arranque alternativo a Amiberry/FS-UAE.
+En lugar de emular hardware completo (LLE), se reimplementa el
+CONTRATO del sistema operativo AmigaOS (HLE - High-Level Emulation):
+
+    Binario 68k compilado para AmigaOS
+            |
+            v
+      Musashi (CPU core 68k, FFI desde Rust)
+            |  JSR a offsets negativos de la jump table
+            |  (ExecBase, DosBase, IntuitionBase, etc.)
+            v
+      Capa Rust: amicachy-exec, amicachy-dos,
+                 amicachy-intuition, etc.
+            |
+            v
+      Linux syscalls / wgpu / cpal / libc sockets
+
+Precedente conceptual: AROS (reimplementación source-compatible
+de AmigaOS 3.1, ground-up, para x86). WINE para Win32. Executor
+para Mac OS clasico 68k.
+
+Target realista: APLICACIONES (productividad, herramientas,
+software de desarrollo), no juegos que acceden directo a
+hardware (copper/blitter) - esos siguen siendo territorio de
+Amiberry/FS-UAE.
+
+NOTA LEGAL: El leak de codigo fuente de AmigaOS 3.1 (filtrado a
+finales de 2015, confirmado por Hyperion Entertainment) NO debe
+usarse como base de implementacion por riesgo de copyright /
+contaminacion de "clean room". La API se reimplementa a partir
+de la NDK publica y documentacion legal.
+
+NAMING: Por temas de copyright, NUNCA usar "Amiga"/"Workbench"/
+"Intuition" como nombres de marca/proyecto. Todo prefijado como
+AmiCachy:
+    - amicachy-compositor
+    - amicachy-exec      (exec.library)
+    - amicachy-dos       (dos.library)
+    - amicachy-intuition (intuition + graphics.library)
+    - amicachy-mui       (MUI)
+    - amicachy-shell
+    - amicachy-desktop   (proceso principal)
+
+
+------------------------------------------------------------------
+2. ARQUITECTURA POR CAPAS - PRIORIDAD DE IMPLEMENTACION
+------------------------------------------------------------------
+
+Capa 1 - CPU + trampolin (Rust + Musashi)
+    - musashi-sys: bindgen sobre Musashi en C (no reescribir, FFI)
+    - musashi-rs: capa segura sobre musashi-sys
+    - Watchpoints en offsets de jump table de cada libreria base
+    - Factible en semanas
+
+Capa 2 - exec.library (amicachy-exec)
+    - Lo mas critico: tasks, memoria, senales, puertos de mensajes,
+      semaforos
+    - AmigaOS es single-process COOPERATIVO (no preemptivo) -
+      facilita mucho la implementacion
+
+Capa 3 - dos.library + intuition.library
+    - dos.library mapea bien a POSIX
+    - intuition.library: screens, windows, gadgets, layers/rastports
+      -> trabajo grande
+
+Capa 4 - graphics.library + blitter
+    - Decision: emular blitter pixel a pixel (correcto, lento) vs
+      interceptar y reimplementar con primitivas modernas (rapido,
+      mas complejo)
+    - Recomendacion: interceptar llamadas de graphics.library y
+      reimplementar con wgpu, NO emular copper/blitter a nivel
+      hardware desde el dia 1
+
+Capa 5 - MUI (amicachy-mui)
+    - Libreria de Stefan Stuntz, modelo de clases BOOPSI
+    - Mas compleja pero desacoplada - dejar para el final
+
+ORDEN DE DESARROLLO RECOMENDADO:
+    Mes 1-2: musashi-sys + binario 68k de test + exec minimo
+             (AllocMem, tareas, senales)
+    Mes 3-4: dos.library suficiente para CLI (arrancar una shell
+             de AmigaOS ya es un hito demostrable)
+    Mes 5-6: Intuition basico sobre wgpu - ventanas, eventos, sin MUI
+    Mes 7+:  Workbench/escritorio, MUI, Paula (audio)
+
+PRIMER PR CONCRETO SUGERIDO:
+    pkg/amiga-hle/ (o amicachy-hle/) con un amicachy-desktop minimo
+    que arranca con Cage, abre ventana wgpu azul Workbench, muestra
+    texto "AmiCachy HLE - WIP" con fuente Topaz. Sin Musashi todavia
+    - solo validar pipeline de build/PKGBUILD/boot entry/Cage.
+
+
+------------------------------------------------------------------
+3. MULTINUCLEO Y MULTIHILO
+------------------------------------------------------------------
+
+PROBLEMA FUNDAMENTAL:
+AmigaOS 3.x es single-core y cooperativo:
+    - Scheduler cooperativo (Wait()/Signal()), 256 niveles de
+      prioridad, sin time slicing por defecto
+    - Estructuras internas de Exec (listas, puertos) SIN locks
+    - Forbid()/Permit() deshabilitan el dispatcher completo
+    - Disable()/Enable() deshabilitan interrupciones
+    - Multihilo naive corrompe las listas internas de Exec
+      (mismo problema que tuvieron MorphOS / AmigaOS 4 con SMP)
+
+ESTRATEGIAS:
+
+Opcion A - Paralelismo externo (recomendada, base del diseno):
+    - Musashi corre en UN UNICO HILO (semantica AmigaOS exacta)
+    - Paralelismo en las capas alrededor:
+        Core 0: Musashi + exec/dos (single-thread)
+        Core 1: Renderer (Intuition/graphics -> wgpu)
+        Core 2: Audio (Paula emulation)
+        Core 3: I/O async (filesystem, red)
+    - Comunicacion via canales (crossbeam/tokio), nunca estado
+      mutable compartido directo
+
+Opcion B - Scheduler cooperativo sobre thread pool:
+    - Cada Task AmigaOS = corrutina/Future en Rust (tokio/async)
+    - Wait() -> .await
+    - Problema: Musashi no es async, requiere wrapper cuidadoso
+
+Opcion C - SMP real con locks (como AmigaOS 4):
+    - Forbid/Permit reimplementados como locks reales
+    - Rompe binary compat con software que asume Forbid() como
+      exclusion mutua sin overhead
+    - Solo aplicable a apps NATIVAS recompiladas, no binarios 68k
+
+RECOMENDACION FINAL: Combinar A + B
+    - Musashi en hilo dedicado (binary compat con software clasico)
+    - Librerias propias en Rust usan async/tokio internamente
+    - Renderer, audio, I/O en cores separados
+    - Software nativo recompilado (futuro) puede usar Opcion C
+
+
+------------------------------------------------------------------
+4. STACK TECNOLOGICO RECOMENDADO
+------------------------------------------------------------------
+
+    Rust para todo el proyecto, excepto Musashi (C maduro, FFI)
+
+    musashi-sys (bindgen)
+    musashi-rs (wrapper seguro)
+
+    amicachy-exec, amicachy-dos, amicachy-intuition,
+    amicachy-graphics, amicachy-audio (Paula)
+
+    Renderer: wgpu (acceso nativo Wayland, blitter como compute
+              shaders). SDL2 como alternativa rapida para empezar
+              y migrar despues (renderer desacoplado)
+    Audio:    cpal (abstrae PipeWire/ALSA automaticamente)
+    Input:    libinput via Smithay
+    Compositor: Smithay (ver seccion 5)
+
+ARQUITECTURA DE HILOS CONCRETA:
+
+    Hilo 1 (main, SCHED_FIFO):  Musashi + exec + dos
+        - Semantica AmigaOS exacta, single-threaded
+        - Nunca bloquea: Wait() = parking de Rust hasta señal
+
+    Hilo 2 (render, SCHED_OTHER): intuition + graphics -> wgpu
+        - Recibe CommandBuffer desde hilo 1 via crossbeam::channel
+
+    Hilo 3 (audio): Paula emulation -> cpal
+        - Ring buffer compartido
+
+    Hilo 4 (async IO): tokio runtime
+        - filesystem, red; dos.library lo usa via oneshot channels
+
+NOTA SOBRE EL SCHEDULER DE LINUX (BORE):
+    Desde Linux, todo el mundo 68k es UN proceso (Musashi) que
+    nunca cede voluntariamente -> BORE lo penalizaria.
+    Solucion: marcar el hilo de Musashi con SCHED_FIFO/SCHED_RR
+    via pthread_setschedparam (similar a las prioridades RT que
+    ya usa Amiberry en AmiCachy).
+
+    unsafe {
+        let param = libc::sched_param { sched_priority: 90 };
+        libc::pthread_setschedparam(
+            libc::pthread_self(), libc::SCHED_FIFO, &param
+        );
+    }
+
+
+------------------------------------------------------------------
+5. COMPOSITOR: CAGE vs SMITHAY
+------------------------------------------------------------------
+
+CAGE (usado actualmente para Amiberry/FS-UAE):
+    - Compositor Wayland minimalista, filosofia "kiosk": una sola
+      app fullscreen, sin gestion de multiples ventanas/workspaces
+    - Perfecto para Amiberry (single fullscreen app)
+    - INSUFICIENTE para AmiCachy-HLE: no puede gestionar
+      simultaneamente ventanas HLE (Musashi) + apps Linux nativas
+
+NIRI / HYPRLAND / SWAY: compositores completos de uso diario
+(tiling, animaciones, etc.) - no es lo que se necesita aqui.
+
+SMITHAY (recomendado para amicachy-compositor):
+    - Libreria Rust de "bloques de construccion" para compositores
+      Wayland (no es un compositor en si, como Django para web apps)
+    - Modulos principales: `backend` (sesion, stack grafico, input)
+      y `wayland` (protocolo)
+    - Construido sobre `calloop` (event loop por callbacks), permite
+      estado mutable centralizado sin Arc<Mutex<T>>
+    - Soporta protocolos core/extendidos, libseat, tablets, XWayland
+      (opcional), DRM/KMS, multi-GPU, libinput
+    - Compositores de referencia para aprender:
+        - smallvil: minimo, educativo, pocas centenas de lineas
+          (punto de partida)
+        - anvil: completo, multi-GPU, XWayland, multiples backends
+          (Udev, Winit, X11) - mirar para la parte DRM/KMS
+
+ARQUITECTURA RESULTANTE:
+
+    Linux kernel
+        |
+        v
+    DRM/KMS + libinput
+        |        |
+        +-Smithay+
+            |
+            v
+      amicachy-compositor (Rust)
+        - calloop event loop
+        - Space (smithay::desktop)
+            - Ventanas HLE (Musashi)
+            - Ventanas Wayland nativas
+            - Decoraciones estilo Workbench (renombrar branding)
+        - GLES/wgpu renderer
+
+LO QUE SMITHAY YA RESUELVE: protocolo Wayland completo, DRM/KMS
+(encaja con la deteccion de GPU ya existente en amilaunch.sh),
+input via libinput, superficies/subsuperficies, multi-monitor.
+
+LO QUE HAY QUE IMPLEMENTAR ENCIMA: layout visual estilo Workbench
+(iconos, drawers, posicionamiento de ventanas), decoraciones de
+ventana estilo Amiga, integracion con Musashi (ventanas HLE como
+superficies Wayland alimentadas por el framebuffer de Intuition),
+menu y sistema de iconos.
+
+CAGE se mantiene para los modos Amiberry/QEMU existentes (sigue
+siendo perfecto ahi). El modo HLE arranca su propio compositor
+basado en Smithay en lugar de Cage.
+
+WAYLAND vs XWAYLAND:
+    - Wayland nativo: la app habla el protocolo directamente
+      (wgpu, SDL2 con backend Wayland, GTK4, Qt6, apps modernas)
+    - XWayland: capa de compatibilidad solo para apps que hablan
+      X11 (legacy, GTK2/Qt4)
+    - amicachy-desktop y las ventanas HLE (wgpu) son Wayland
+      nativo por diseno
+    - Recomendacion: Wayland nativo por defecto, XWayland como
+      paquete OPCIONAL activable por el usuario (Cage soporta
+      compilarse con opcion xwayland)
+
+
+------------------------------------------------------------------
+6. WORKBENCH: REIMPLEMENTACION PROPIA vs APPS LINUX
+------------------------------------------------------------------
+
+OPCION A - Workbench como frontend de apps Linux (Thunar, mpv,
+etc. con theming Amiga, estilo Dank Material Shell/Cairo-Dock):
+    - Rapido de implementar
+    - PROBLEMA FATAL: Musashi/binarios 68k esperan hablar con
+      exec/dos/Intuition, no con GTK/Qt. Dos mundos sin puente.
+
+OPCION B - Sistema propio completo desde cero (screens, windows,
+icons, drawers - semantica AmigaOS real; apps Linux como ventanas
+"de segundo ciudadano", al estilo MorphOS Ambient):
+    - Coherencia total pero enormemente ambicioso (AROS lleva
+      decadas en esto)
+
+RECOMENDACION: Opcion B con alcance limitado.
+    - amicachy-compositor (Smithay) gestiona DOS tipos de ventana:
+        - Ventanas HLE (binario 68k via Musashi) -> gestionadas por
+          amicachy-intuition
+        - Ventanas Linux nativas (Wayland nativo, opcionalmente
+          XWayland) -> decoradas con estilo Amiga "por fuera"
+
+    +-----------------------------------------------------+
+    | AmiCachyShell (Workbench propio)                     |
+    |  +----------------+   +-------------------------+   |
+    |  | Ventana HLE    |   | Ventana Linux nativa     |   |
+    |  | (68k/Musashi)  |   | (terminal, editor, etc.) |   |
+    |  +----------------+   +-------------------------+   |
+    |  Iconos, drawers, menu - semantica AmigaOS           |
+    +-----------------------------------------------------+
+
+ORDEN SUGERIDO:
+    1. Shell visual: fondo, iconos, menu Amiga, decoracion de
+       ventanas estilo WB
+    2. Integracion de apps Linux nativas (Wayland nativo;
+       XWayland opcional)
+    3. Ventanas HLE: primer binario 68k corriendo en el shell
+    4. Sistema de Preferencias declarativo
+    5. MUI (cuando Intuition este solido)
+
+SISTEMA DE CONFIGURACION (no estilo GNOME/dconf):
+    Fichero declarativo simple, ej. ~/.amicachy/prefs.toml:
+
+    [workbench]
+    screen_mode = "1920x1080x32"
+    backdrop = "blue"  # o ruta a imagen IFF
+
+    [fonts]
+    system = "Topaz"
+    screen = "Diamond"
+
+    [palette]
+    # paleta clasica o extendida RTG
+
+    [[apps.drawer]]
+    name = "Utilities"
+    icon = "drawer.info"
+    items = ["Shell", "Calculator", "VSCode"]
+
+    Cada categoria de Preferencias = ejecutable separado, como en
+    el Workbench original ("Prefs").
+
+
+------------------------------------------------------------------
+7. DASH COMO LENGUAJE CROSS-TARGET
+------------------------------------------------------------------
+
+ESTADO ACTUAL DE DASH (github.com/FreeMEM/dash):
+    - "Development Amiga Synthesis Hub"
+    - Pipeline: .dash -> Parser (Lark) -> AST -> Analyzer -> CodeGen
+                -> C -> GCC (m68k-amigaos-gcc) -> ejecutable Amiga
+    - Sintaxis tipo Ruby/Python, tipos inferidos
+    - Acceso directo a Intuition, Graphics, Sprites, Copper,
+      Blitter, Audio, IFF, DOS, RTG, Double Buffering, FFI
+    - Estructura: compiler/ (grammar.py, transformer.py,
+      ast_nodes.py, analyzer.py, codegen.py, amiga_builtins.py),
+      runtime/, lib/amiga/, examples/ (incl. "blixel", programa
+      de ejemplo), tests/, docs/
+    - Genera C estandar -> cross-compilation es casi gratis,
+      cambia el toolchain target
+
+OBJETIVO: DASH debe poder generar tambien binarios nativos x86_64
+y aarch64 indicando solo el target (ademas de 68k/AmigaOS).
+
+    DASH source (.dash)
+            |
+            v
+        DASH compiler
+            |
+            +-- --target=m68k-amigaos -> C -> m68k-amigaos-gcc
+            |                                 -> binario 68k (HLE)
+            +-- --target=x86_64-linux -> C -> gcc/clang
+            |                                 -> binario x86_64
+            +-- --target=aarch64-linux -> C -> aarch64-linux-gcc
+            |                                  -> binario ARM64
+            +-- --target=wasm32 -> C -> emcc -> WebAssembly (futuro)
+
+EL "RUNTIME PROBLEM": una app DASH que llama OpenWindow() necesita
+una implementacion distinta segun target. Opciones:
+
+    A) API unificada AmiCachy: un runtime propio (amicachy-intuition)
+       implementado para cada target (68k via jump table HLE, x86
+       nativo via Rust/Wayland, wasm via Canvas). Mismo aspecto en
+       todos los targets (modelo tipo Flutter/JVM). RECOMENDADA
+       para coherencia visual.
+
+    B) POSIX para targets nativos + toolkit solo en UI: mas simple,
+       pero apps no lucen igual entre plataformas.
+
+    C) Binarios "fat" / paquete .acz multi-arquitectura:
+
+       MANIFEST.toml:
+           [[binary]]
+           arch = "m68k"
+           file = "bin/mi-app.68k"
+           [[binary]]
+           arch = "x86_64"
+           file = "bin/mi-app.x86_64"
+           [[binary]]
+           arch = "aarch64"
+           file = "bin/mi-app.aarch64"
+
+       acp install descarga el .acz e instala el binario correcto
+       para la arquitectura actual.
+
+PIEZA CLAVE QUE UNE TODO: libamicachy-intuition
+    - En 68k/HLE: jump table de amicachy-intuition (Rust)
+    - En x86/ARM nativo: libamicachy-intuition.so (mismo codigo
+      Rust compilado nativo)
+    - Mismo header C publico para ambos:
+
+      /* amicachy/intuition.h - mismo header en todos los targets */
+      typedef struct ACWindow ACWindow;
+      typedef struct ACEvent  ACEvent;
+      ACWindow* ac_open_window(const char* title, int w, int h);
+      void      ac_close_window(ACWindow* win);
+      int       ac_wait_event(ACWindow* win, ACEvent* ev);
+      void      ac_draw_text(ACWindow* win, int x, int y, const char* text);
+
+    Resultado: una app DASH compilada a 68k (corriendo via Musashi)
+    y la misma app compilada a x86 nativo tienen EXACTAMENTE el
+    mismo aspecto, porque ambas usan amicachy-intuition.
+
+REFACTOR SUGERIDO EN EL REPO DE DASH (sin tocar gramatica/AST/
+analyzer, que son 100% portables):
+
+    lib/
+    +-- amiga/        (ya existe - bindings 68k/AmigaOS)
+    +-- amicachy/      (nuevo - bindings targets nativos)
+        +-- x86_64.h
+        +-- aarch64.h
+
+    compiler/builtins/   (refactor de amiga_builtins.py)
+    +-- base.py          (interfaz comun: Window, EventLoop, Print...)
+    +-- target_68k.py     (genera llamadas a AmigaOS/HLE)
+    +-- target_x86.py     (genera llamadas a libamicachy-intuition.so)
+    +-- target_wasm.py    (futuro, Canvas API)
+
+CLI:
+    ./dash hola.dash -o bin/hola --target=68k       (default actual)
+    ./dash hola.dash -o bin/hola --target=x86_64
+    ./dash hola.dash -o bin/hola --target=aarch64
+    ./dash hola.dash -o bin/hola --target=all
+
+PASOS 1-4 (refactor builtins, definir headers, implementar
+target_x86 con stub, anadir --target al CLI) se pueden hacer YA,
+sin esperar a que amicachy-intuition en Rust este listo. El paso 5
+(compilar libamicachy-intuition.so para x86 real) depende del
+avance del HLE.
+
+
+------------------------------------------------------------------
+8. GESTOR DE PAQUETES: acp (AmiCachy Packages)
+------------------------------------------------------------------
+
+PROBLEMA: dos mundos de binarios distintos:
+    - Repositorio nativo (x86/ARM): paquetes Linux normales
+    - Repositorio 68k: Aminet (~25.000 paquetes existentes) +
+      repo propio de AmiCachy
+
+RECOMENDACION: un unico frontend `acp` que abstrae ambos mundos:
+
+    acp install dopus      # Directory Opus 68k desde Aminet/repo propio
+    acp install vscode     # VS Code nativo via pacman
+    acp search tracker      # busca en ambos repos
+    acp update               # actualiza todo
+
+ARQUITECTURA DE acp:
+
+    acp (CLI en Rust)
+    +-- backend::native    -> wrapper de pacman/libalpm
+    +-- backend::hle68k     -> gestor propio binarios 68k
+    |   +-- source::aminet     (API/scraping de Aminet, indice
+    |   |                        plano "INDEX")
+    |   +-- source::amicachy    (repositorio oficial propio)
+    +-- store               -> SQLite local (que esta instalado,
+                                de donde, version)
+
+FORMATO DE PAQUETE PROPIO 68k: .acz (tar.zst + manifiesto TOML)
+
+    # MANIFEST.toml
+    name = "dopus5"
+    version = "5.82"
+    arch = "m68k"          # o "x86_64", "aarch64"
+    requires_hle = true    # necesita amicachy-intuition
+    depends = []
+    entry = "DOpus5/DOpus"
+
+INFRAESTRUCTURA DEL REPO PROPIO: servidor estatico (nginx/S3) +
+indice JSON. Mismo modelo que repos de Arch (ficheros estaticos +
+indice). No requiere nada complejo para empezar.
+
+INTEGRACION CON AMINET: Aminet tiene estructura de directorios
+publica/predecible (aminet.net/pub/aminet/...) con .lha y un
+fichero INDEX plano. acp puede descargar el indice, cachear
+metadatos en SQLite, descargar+extraer .lha al instalar. Limitacion:
+Aminet no tiene metadatos de dependencias - curar manualmente para
+los paquetes mas populares en el repo propio.
+
+ORDEN DE IMPLEMENTACION:
+    1. acp search/install para Aminet (80% del software retro
+       disponible sin repo propio)
+    2. Store local SQLite
+    3. acp install para nativo via pacman (wrapper simple)
+    4. Repo propio (cuando haya software especifico para
+       AmiCachy-HLE no disponible en Aminet)
+
+NOTA: el gestor 68k tiene sentido completo solo cuando
+amicachy-intuition/amicachy-exec funcionen, pero puede
+desarrollarse en PARALELO desde el principio (es independiente
+del emulador).
+
+INTERFAZ: CLI primero; valorar GUI estilo instalador del Workbench
+original mas adelante.
+
+
+------------------------------------------------------------------
+9. REPOSITORIOS DE PAQUETES: CACHYOS vs PROPIO
+------------------------------------------------------------------
+
+SITUACION ACTUAL: AmiCachy ya bebe directamente de CachyOS
+(pacman-{generic,v3,v4}.conf apuntan a sus repos).
+
+CORTO PLAZO (ahora): seguir bebiendo de CachyOS directamente.
+    Ventajas: cero mantenimiento de infraestructura, kernels
+    optimizados siempre actualizados, los 3 tiers de CPU
+    (generic/v3/v4) gestionados por CachyOS.
+    Riesgos: cambios de nombres/reorganizacion de repos por parte
+    de CachyOS pueden romper la ISO sin aviso; dependencia de su
+    uptime para builds.
+
+MEDIO PLAZO: repo OVERLAY propio (no reemplaza a CachyOS):
+
+    Arch repos (base)
+        ^
+    CachyOS repos (kernels optimizados, v3/v4)
+        ^
+    AmiCachy repo (paquetes propios: amicachy-compositor, acp,
+                   amicachy-exec, amiberry optimizado, etc.)
+
+    Solo se mantienen los paquetes propios; el resto sigue viniendo
+    de CachyOS/Arch.
+
+    repo-add /srv/amicachy/amicachy.db.tar.gz nuevo-paquete.pkg.tar.zst
+    (servido por nginx estatico)
+
+    pacman.conf:
+    [amicachy]
+    Server = https://packages.amicachy.org/$arch
+    SigLevel = Required
+    [cachyos-v3]
+    Server = https://mirror.cachyos.org/repo/x86_64_v3/$repo
+    ...
+    (AmiCachy resuelve primero, CachyOS despues)
+
+PRIMER PAQUETE QUE YA JUSTIFICA REPO PROPIO: amiberry (ya se
+compila con flags especificos) - publicarlo en repo propio en
+lugar de copiarlo manualmente al ISO permite actualizaciones sin
+reconstruir la ISO completa.
+
+INFRAESTRUCTURA DISPONIBLE: LXC en OVH (Proxmox) con nginx y
+~5GB de disco es suficiente para empezar.
+
+ALOJAMIENTO (proyecto bajo GitHub, sin dominio propio aun):
+
+    Opcion A - GitHub Releases: simple pero URLs cambian por
+    release, no apto para pacman -Sy (necesita URL estable). NO
+    recomendada.
+
+    Opcion B - GitHub Pages: rama gh-pages o directorio docs/
+    sirviendo el repo como sitio estatico (ej.
+    freemem.github.io/AmiCachy/$arch). URL estable, gratis.
+
+    Opcion C - Repo dedicado FreeMEM/amicachy-packages con GitHub
+    Pages, separado del codigo fuente del ISO. RECOMENDADA.
+
+    pacman.conf:
+    [amicachy]
+    Server = https://freemem.github.io/amicachy-packages/$arch
+
+    WORKFLOW GitHub Actions (build+publish automatico al hacer
+    push a pkg/), reutilizando el patron Docker existente
+    (build_iso_docker.sh):
+
+    on:
+      push:
+        paths: ['pkg/**']
+    jobs:
+      build-and-publish:
+        runs-on: ubuntu-latest
+        container: cachyos/cachyos-base
+        steps:
+          - uses: actions/checkout@v4
+          - run: cd pkg/amiberry && makepkg -s
+          - run: repo-add amicachy.db.tar.gz *.pkg.tar.zst
+          - uses: peaceiris/actions-gh-pages@v3
+            with:
+              github_token: ${{ secrets.GITHUB_TOKEN }}
+              publish_dir: ./repo
+
+CUANDO MIGRAR A INFRA PROPIA: si GitHub Pages alcanza limites de
+ancho de banda (100GB/mes), si se necesitan paquetes firmados con
+GPG en serio, o si el proyecto crece y necesita mirrors. En ese
+punto: cambiar una URL en pacman.conf hacia el LXC de OVH.
+
+
+------------------------------------------------------------------
+10. SCHEDULER, IXEMUL Y MODELO DE TASKS/MEMORIA/SENALES
+------------------------------------------------------------------
+
+SCHEDULER REAL DE AMIGAOS:
+    - 256 niveles de prioridad (0-255)
+    - Cooperativo: una tarea corre hasta Wait(), o hasta que una
+      tarea de mayor prioridad se desbloquea
+    - Forbid()/Permit(): deshabilitan el dispatcher completo
+    - Disable()/Enable(): deshabilitan interrupciones
+    - Sin time slicing por defecto (igual prioridad = se turnan
+      solo en Wait())
+
+IXEMUL: libreria historica que portaba POSIX a AmigaOS (direccion
+inversa a lo que hace AmiCachy). Resolvio el mismo tipo de
+"impedance mismatch" entre modelos:
+
+    AmigaOS                     Linux/POSIX
+    ---------------------------------------------
+    Tasks (sin fork/exec)   vs  procesos con fork()
+    Message ports           vs  pipes/sockets
+    Signals (32 bits)        vs  senales POSIX
+    Shared libraries          vs  .so con dlopen()
+    Single address space      vs  address spaces separados
+
+    AmiCachy controla AMBOS lados, lo que simplifica respecto a
+    los hacks que usaba ixemul.
+
+1) MODELO DE TASKS:
+    Cada Task 68k corre dentro de UN hilo Linux (el de Musashi).
+    El scheduler de AmigaOS se implementa en Rust como loop
+    cooperativo single-threaded:
+
+    pub struct Scheduler {
+        ready_queue: BTreeMap<Priority, VecDeque<TaskId>>,
+        current: Option<TaskId>,
+        forbidden: bool,   // Forbid() activo
+        disabled: bool,    // Disable() activo
+    }
+
+    impl Scheduler {
+        pub fn dispatch(&mut self) -> TaskId {
+            if self.forbidden {
+                return self.current.unwrap();
+            }
+            self.ready_queue
+                .iter().rev()
+                .find(|(_, q)| !q.is_empty())
+                .map(|(_, q)| q[0])
+                .unwrap()
+        }
+    }
+
+2) SIGNALS vs SENALES POSIX:
+    32 senales por tarea (bitmask), AtomicU32 por tarea:
+
+    pub struct Task {
+        id: TaskId,
+        priority: u8,
+        signal_alloc: AtomicU32,  // senales asignadas
+        signal_wait:  AtomicU32,  // en que espera (Wait())
+        signal_recv:  AtomicU32,  // senales recibidas pendientes
+        stack: Vec<u8>,
+        cpu_state: MusashiContext,
+    }
+
+    Wait(mask) suspende hasta que cualquier bit de mask aparece en
+    signal_recv. Signal(task, mask) pone bits en signal_recv del
+    destino y dispara el scheduler.
+
+3) MESSAGE PASSING:
+    PutMsg/GetMsg/WaitPort: cola FIFO de punteros a estructuras en
+    memoria compartida. Como todas las Tasks comparten el mismo
+    address space emulado (Vec<u8> de Musashi), el modelo se
+    preserva exactamente.
+
+4) BORE vs SCHEDULER AMIGAOS (ver seccion 4): hilo de Musashi con
+   SCHED_FIFO/SCHED_RR para que BORE no lo penalice por no ceder
+   voluntariamente.
+
+5) MODELO DE MEMORIA:
+    $000000-$1FFFFF  Chip RAM (accesible por blitter/copper/audio)
+    $200000-$9FFFFF  Fast RAM (solo CPU)
+    $C00000-$DFFFFF  Slow RAM / Ranger RAM
+    $F00000-$FFFFFF  ROM (Kickstart)
+
+    Implementacion: Vec<u8> de 16MB con regiones marcadas.
+    AllocMem() con MEMF_CHIP vs MEMF_FAST asigna de regiones
+    distintas del mismo buffer.
+
+6) INTERRUPCIONES Y VBLANK:
+    AmigaOS depende del VBlank (50/60Hz) para timing. Cada frame
+    completado del renderer wgpu/GLES dispara un Signal() simulado
+    a las tareas que esperan SIGB_VBLANK, manteniendo la
+    sincronizacion temporal esperada por el software.
+
+MAPA COMPLETO DE LA ARQUITECTURA DE EJECUCION:
+
+    Hilo Linux SCHED_FIFO (Musashi + amicachy-exec)
+    +-- Scheduler cooperativo (BTreeMap de prioridades)
+    +-- Task list (Vec<Task> con AtomicU32 de senales)
+    +-- Memory map (Vec<u8> 16MB con regiones)
+    +-- Message ports (HashMap<PortId, VecDeque<MsgPtr>>)
+    +-- Jump table interceptor
+        +-- exec.library  -> amicachy-exec (Rust)
+        +-- dos.library   -> amicachy-dos (Rust)
+        +-- intuition     -> amicachy-intuition (Rust)
+            +-> crossbeam::channel -> Hilo renderer
+
+    Hilo Linux SCHED_OTHER (renderer)
+    +-- wgpu/GLES -> DRM/KMS -> pantalla
+
+DIFERENCIA CLAVE vs emuladores convencionales: Amiberry/FS-UAE
+emulan TODO el hardware (Agnus, Denise, Paula...). AmiCachy-HLE
+emula el CONTRATO del SO - mas eficiente pero mas dificil de
+hacer correcto, y software con acceso directo a hardware (la
+mayoria de juegos) no funcionara sin capas adicionales.
+
+
+------------------------------------------------------------------
+11. PROTECCION DE MEMORIA
+------------------------------------------------------------------
+
+REALIDAD DE AMIGAOS: sin proteccion de memoria. Cualquier tarea
+puede leer/escribir cualquier direccion. Un puntero corrupto no
+da segfault, machaca otra estructura. Forbid()/Disable() bastan
+para exclusion mutua porque no hay MMU activa (deliberado, ni en
+68020/030/040).
+
+VENTAJA GRATUITA EN AMICACHY: Musashi opera sobre un Vec<u8> propio
+(~16MB). Desde el binario 68k, ese buffer ES todo el universo
+visible. El proceso Rust host, el kernel, todo lo demas es
+invisible e inaccesible:
+
+    Proceso amicachy-desktop (Rust, x86_64)
+    +-- Codigo Rust          <- inaccesible desde 68k
+    +-- Musashi engine
+    +-- memoria emulada []   <- unico espacio visible para 68k
+        +-- 0x000000 Chip RAM
+        +-- 0x200000 Fast RAM
+        +-- 0xF00000 Kickstart/jump tables
+
+    Un binario 68k buggy/malicioso solo dana ese Vec<u8>. No puede
+    escapar al proceso host -> mejor proteccion que un Amiga real.
+
+PROBLEMAS REALES (dentro del espacio emulado):
+
+    1) Corrupcion entre tareas 68k: sin proteccion entre ellas,
+       igual que en AmigaOS real (es el contrato historico). Modo
+       debug opcional: amicachy-exec marca regiones asignadas y
+       detecta escrituras fuera de rango (util en desarrollo con
+       DASH).
+
+    2) Acceso a hardware mapeado (ej. 0xDFF000 custom chips):
+       interceptar con callbacks de Musashi:
+
+       fn memory_write(address: u32, value: u32, size: AccessSize) {
+           match address {
+               0xDFF000..=0xDFF1FF => custom_chips.write(address, value),
+               0x000000..=0x1FFFFF => ram[address as usize] = value as u8,
+               _ => musashi.trigger_bus_error(address),
+           }
+       }
+
+    3) Stack overflow dentro del espacio emulado: AmigaOS no lo
+       detecta. Opcional: marcar la pagina inferior del stack con
+       patron conocido (0xDEADBEEF) y verificar periodicamente.
+
+PROTECCIONES A IMPLEMENTAR DESDE EL PRINCIPIO:
+
+    - Guardas/magic numbers en estructuras criticas de
+      amicachy-exec (ExecBase, listas de tareas, message ports):
+
+      pub struct ExecBase {
+          magic: u32,  // 0xAC_EXEC_42
+          lib_node: LibNode,
+          task_ready: List,
+          task_wait: List,
+      }
+      impl ExecBase {
+          pub fn verify(&self) -> bool { self.magic == 0xAC_EXEC_42 }
+      }
+
+      Si verify() falla -> reset limpio del entorno HLE en lugar
+      de crash misterioso.
+
+    - Aislamiento entre sesiones: cada instancia HLE = su propio
+      Vec<u8> separado. Gratis con la arquitectura de procesos
+      Linux (cada amicachy-desktop es un proceso separado).
+
+DASH Y PROTECCION: binarios DASH para target=68k tienen el mismo
+aislamiento que cualquier binario 68k. Se puede activar
+-fstack-protector-strong en m68k-amigaos-gcc para canarios de
+stack, sin romper compatibilidad.
+
+TABLA RESUMEN:
+
+    Amenaza                                  | Nivel       | Solucion
+    ------------------------------------------------------------------
+    Binario 68k accede a memoria del host    | Inexistente | Aislamiento por arquitectura (gratis)
+    Binario 68k corrompe otra tarea 68k      | Real        | Contrato historico; deteccion en modo debug
+    Acceso a hardware mapeado                | Real        | Callbacks Musashi + whitelist de registros
+    Stack overflow en espacio emulado        | Real        | Magic patterns en zona de guarda (opcional)
+    Corrupcion de estructuras amicachy-exec  | Real        | Magic numbers + verify() en paths criticos
+
+
+------------------------------------------------------------------
+12. PERIFERICOS: AUDIO, IMPRESORAS, TCP/IP, ETC.
+------------------------------------------------------------------
+
+AUDIO - PAULA:
+    Hardware real: 4 canales DMA, PCM 8-bit, registros en
+    0xDFF0A0-0xDFF0DF.
+
+    Nivel 1 - Register emulation (software que habla directo al
+    hardware): interceptar escrituras via callback de Musashi:
+        0xDFF0A0 -> paula.set_sample_pointer(CH0, value)  (AUD0LCH/L)
+        0xDFF0A4 -> paula.set_period(CH0, value)          (AUD0PER)
+        0xDFF0A6 -> paula.set_volume(CH0, value)          (AUD0VOL)
+    Paula genera PCM -> cpal.
+
+    Nivel 2 - audio.device HLE (software que usa la API estandar):
+    interceptar en la jump table igual que exec.library.
+
+    Stack: Paula emulation (Rust) -> ring buffer -> cpal ->
+    PipeWire/ALSA. cpal abstrae PipeWire automaticamente en CachyOS.
+
+IMPRESORAS:
+    AmigaOS: printer.device, apps imprimen a "PRT:" como fichero DOS
+    (PostScript/PCL/texto plano).
+
+    AmiCachy: PRT: -> fichero temporal -> CUPS:
+        DosOpen("PRT:")  -> crea /tmp/amicachy-print-XXXX
+        DosClose("PRT:") -> lp /tmp/amicachy-print-XXXX
+
+    Usuario configura impresora en CUPS desde Linux normalmente.
+    Panel de Preferencias en AmiCachy lista impresoras CUPS
+    disponibles. Sin reinventar drivers.
+
+TCP/IP - bsdsocket.library:
+    Caso mas elegante: bsdsocket.library (AmiTCP/Miami/Genesis) es
+    practicamente BSD sockets directo (socket/connect/send/recv/
+    select casi identicos a POSIX). Mapping casi 1:1:
+
+        "socket"  => libc::socket(domain, sock_type, protocol)
+        "connect" => libc::connect(fd, addr, addrlen)
+        "send"    => libc::send(fd, buf, len, flags)
+        "recv"    => libc::recv(fd, buf, len, flags)
+        "select"  => libc::select(nfds, readfds, writefds, exceptfds, timeout)
+
+    "Truco": traduccion de estructuras (sockaddr 68k es big-endian,
+    offsets distintos) - trabajo mecanico, no conceptualmente dificil.
+
+    Resultado: cualquier app 68k con bsdsocket.library tiene RED
+    REAL via el stack TCP/IP de Linux, transparente.
+
+    DNS: gethostbyname() -> getaddrinfo() de Linux.
+
+SERIAL/PARALELO:
+    serial.device -> /dev/ttyS*
+    parallel.device -> /dev/lp*
+    Si no hay hardware real, el device open falla limpiamente.
+
+CD-ROM / FILESYSTEM:
+    cd.device -> /dev/sr0 via libcdio (ISO9660 nativo en Linux)
+    trackdisk.device -> ficheros .adf en ~/amicachy/floppies/
+    (igual que Amiberry)
+
+CLIPBOARD:
+    clipboard.device (unidades IFF) -> portapapeles de Wayland via
+    wl-clipboard. Copiar/pegar entre apps 68k y apps Linux nativas
+    de forma transparente - detalle pequeno pero da sensacion de
+    integracion real.
+
+MAPA COMPLETO DE DEVICES:
+
+    AmigaOS device       | AmiCachy-HLE implementacion
+    -----------------------------------------------------------
+    audio.device         | Paula emu -> cpal -> PipeWire
+    bsdsocket.library    | libc BSD sockets (casi 1:1)
+    printer.device       | fichero temporal -> CUPS
+    serial.device        | /dev/ttyS* (si existe)
+    parallel.device      | /dev/lp* (si existe)
+    clipboard.device     | wl-clipboard (Wayland)
+    trackdisk.device     | ficheros .adf
+    cd.device            | /dev/sr0 via libcdio
+    timer.device         | clock_gettime(CLOCK_MONOTONIC)
+    input.device         | libinput via Smithay
+    keyboard.device      | libinput via Smithay
+    gameport.device      | /dev/input/js* (joystick Linux)
+
+ORDEN DE IMPLEMENTACION POR IMPACTO EN COMPATIBILIDAD:
+    1. timer.device   - dependencia silenciosa de muchisimas apps
+                         (sleeps/timeouts), trivial de implementar
+    2. bsdsocket.library - alto impacto, mapping casi directo
+    3. audio.device + Paula - necesario para apps multimedia
+    4. clipboard.device - pequeno pero da sensacion de integracion
+    5. trackdisk -> .adf - software que accede a discos
+    6. printer.device -> CUPS - simple y util
+    7. serial/parallel - opcional, solo con hardware real
+
+
+------------------------------------------------------------------
+13. SISTEMA DE DIRECTORIOS Y ASSIGNS (estilo Amiga)
+------------------------------------------------------------------
+
+PROBLEMA: usuarios de Amiga son reacios a /root, /var, /usr, /lib,
+/bin, /home. AmiCachy debe ocultar la jerarquia Unix bajo un
+sistema de "assigns" tipo AmigaOS, autoconfigurado.
+
+ASSIGNS CLASICOS DE AMIGAOS:
+    SYS:      -> volumen del sistema (disco de arranque)
+    Workbench:-> alias de SYS:
+    C:        -> SYS:C/      (comandos, ~/usr/bin)
+    S:        -> SYS:S/      (scripts de arranque, ~/etc)
+    L:        -> SYS:L/      (handlers de filesystem)
+    LIBS:     -> SYS:Libs/   (librerias compartidas)
+    DEVS:     -> SYS:Devs/   (drivers de devices)
+    ENVARC:   -> SYS:Prefs/Env-Archive/ (variables persistentes)
+    ENV:      -> RAM:Env/    (variables en memoria, volatil)
+    RAM:      -> ramdisk
+    FONTS:    -> SYS:Fonts/
+    T:        -> RAM:T/      (temporales)
+
+    El usuario nunca ve rutas Unix: ve LIBS:muimaster.library,
+    C:Dir, ENVARC:Workbench/ScreenMode.
+
+PROPUESTA DE ARBOL FISICO PARA AMICACHY:
+
+    /opt/amicachy/                  <- raiz del sistema AmiCachy
+    +-- System/                     <- SYS:
+    |   +-- C/                      <- C:  (comandos 68k)
+    |   +-- S/                      <- S:  (scripts)
+    |   +-- Libs/                   <- LIBS:
+    |   +-- Devs/                   <- DEVS:
+    |   +-- Fonts/                  <- FONTS:
+    |   +-- L/                      <- L:
+    |   +-- Prefs/
+    |       +-- Env-Archive/        <- ENVARC:
+    +-- RAM/                        <- RAM: (tmpfs montado aqui)
+    |   +-- T/                      <- T:
+    |   +-- Env/                    <- ENV:
+    +-- Storage/                    <- almacenamiento del usuario
+    |   +-- Programs/                <- donde instala acp
+    |   +-- Floppies/                <- .adf
+    |   +-- HardDrives/               <- .hdf / directorios montados
+    +-- User/                       <- home del usuario Amiga
+        +-- Documents/
+        +-- Pictures/
+        +-- Music/
+
+    El usuario nunca necesita saber que existe /opt/amicachy.
+
+ASSIGN TABLE en amicachy-dos (resuelve cualquier ruta AmigaOS a
+ruta Linux):
+
+    pub struct AssignTable {
+        assigns: HashMap<String, PathBuf>,
+    }
+
+    impl AssignTable {
+        pub fn default() -> Self {
+            let root = PathBuf::from("/opt/amicachy");
+            let mut t = HashMap::new();
+            t.insert("SYS",     root.join("System"));
+            t.insert("C",       root.join("System/C"));
+            t.insert("LIBS",    root.join("System/Libs"));
+            t.insert("DEVS",    root.join("System/Devs"));
+            t.insert("FONTS",   root.join("System/Fonts"));
+            t.insert("ENVARC",  root.join("System/Prefs/Env-Archive"));
+            t.insert("ENV",     PathBuf::from("/run/amicachy/env")); // tmpfs
+            t.insert("T",       PathBuf::from("/run/amicachy/tmp")); // tmpfs
+            t.insert("RAM",     PathBuf::from("/run/amicachy"));
+            t.insert("User",    dirs::home_dir().unwrap().join("AmiCachy"));
+            t
+        }
+
+        pub fn resolve(&self, amiga_path: &str) -> Option<PathBuf> {
+            // "LIBS:muimaster.library" -> "/opt/amicachy/System/Libs/muimaster.library"
+            if let Some((assign, rest)) = amiga_path.split_once(':') {
+                self.assigns.get(assign)
+                    .map(|base| base.join(rest.trim_start_matches('/')))
+            } else {
+                None
+            }
+        }
+    }
+
+    Cualquier Open()/Lock()/Examine() de amicachy-dos pasa por
+    resolve() antes de tocar el filesystem Linux.
+
+RAM: COMO TMPFS REAL:
+
+    tmpfs /run/amicachy tmpfs mode=0755,uid=amiga,size=256M 0 0
+
+    Al arrancar, amicachy-dos crea /run/amicachy/env/ y
+    /run/amicachy/tmp/ - igual que un Amiga real al encender.
+
+VARIABLES DE ENTORNO AMIGAOS (SetVar/GetVar):
+    Cada variable = un FICHERO individual en ENV:
+        ENV:Workbench/ScreenMode  -> contiene "1920x1080x32"
+        ENV:Sys/NoCapsLock        -> existe el fichero = feature activa
+        ENVARC:                   -> copia persistente de ENV:
+
+    En AmiCachy es literal: cada variable es un fichero en
+    /run/amicachy/env/. GetVar/SetVar leen/escriben ese fichero.
+    Al apagar, amicachy-desktop sincroniza ENV: -> ENVARC:
+    (persistencia, semantica original exacta).
+
+INSTALACION DE SOFTWARE (acp):
+    acp install dopus instala dentro del arbol AmiCachy, NUNCA
+    toca /usr:
+
+        /opt/amicachy/System/C/DOpus           <- binario 68k
+        /opt/amicachy/System/Libs/dopus.library
+        /opt/amicachy/Storage/Programs/DOpus/  <- drawer, iconos, prefs
+
+    Binarios nativos x86 del propio sistema AmiCachy (compositor,
+    acp, herramientas):
+
+        /opt/amicachy/Native/bin/   <- binarios x86 del sistema
+        /opt/amicachy/Native/lib/   <- libamicachy-intuition.so, etc.
+
+    Rutas internas, el usuario nunca las ve.
+
+PANEL DE PREFERENCIAS DE ASSIGNS (visual, sin editar ficheros):
+
+    AmiCachy Assigns Preferences
+    +-----------------------------------+
+    | Work:   [/home/francisco/Amiga]   |  <- editable
+    | Music:  [RAM:Music]               |
+    | Extra:  [/mnt/disco_externo]      |  <- cualquier ruta Linux
+    +-----------------------------------+
+
+    Internamente escribe en ENVARC:. El usuario nunca escribe una
+    ruta Unix a mano.
+
+DETALLE IMPORTANTE - PATH SEPARATOR:
+    AmigaOS usa ":" para separar assign del path, y "/" tanto
+    dentro de un volumen como para indicar "directorio padre"
+    (equivalente a ".." en Unix):
+
+        LIBS:                   -> /opt/amicachy/System/Libs/
+        LIBS:muimaster.library  -> /opt/amicachy/System/Libs/muimaster.library
+        /muimaster.library      -> directorio padre (relativo)
+
+    amicachy-dos debe implementar esta semantica correctamente en
+    resolve() desde el principio, o aparecen bugs sutiles con
+    software que usa paths relativos con "/".
+
+RESUMEN VISUAL/USUARIO vs LINUX:
+
+    Usuario ve:                    Linux ve:
+    -----------------------------------------------------------------
+    SYS:Libs/                      /opt/amicachy/System/Libs/
+    ENV:Workbench/ScreenMode        /run/amicachy/env/Workbench/ScreenMode
+    T:fichero-temporal               /run/amicachy/tmp/fichero-temporal
+    Work:MiProyecto/                  /home/francisco/AmiCachy/MiProyecto/
+
+    El puente es AssignTable en amicachy-dos. El resto del sistema
+    (HLE, acp, shell, DASH) usa solo rutas AmigaOS.
+
+
+------------------------------------------------------------------
+14. PERMISOS, PROPIETARIO, GRUPO
+------------------------------------------------------------------
+
+REALIDAD DE AMIGAOS: NO existen permisos de fichero. Sin usuarios,
+sin grupos, sin chmod/chown. Cualquier proceso puede leer/escribir/
+borrar cualquier fichero. Lo unico parecido son los PROTECTION BITS
+(puramente informativos/convencionales):
+
+    h  s  p  a  r  w  e  d
+    |  |  |  |  |  |  |  +- deletable
+    |  |  |  |  |  |  +---- executable
+    |  |  |  |  |  +------- writable
+    |  |  |  |  +---------- readable
+    |  |  |  +------------- archived (flag de backup)
+    |  |  +---------------- pure (reentrante, puede quedar en memoria)
+    |  +------------------- script
+    +---------------------- hold (no expulsar de memoria)
+
+    Sin separacion usuario/kernel. Sin root. Nada impide a un
+    programa borrar el SO completo.
+
+CAPA 1 - PERMISOS LINUX SOBRE /opt/amicachy:
+    Todo el arbol pertenece a un usuario Linux dedicado "amiga".
+    amicachy-desktop corre como "amiga" (usuario normal sin
+    privilegios, no puede tocar /usr, /etc, /home de otros, etc.):
+
+        useradd -r -m -d /opt/amicachy amiga
+        chown -R amiga:amiga /opt/amicachy
+        chmod 755 /opt/amicachy
+
+    El aislamiento Linux queda resuelto sin nada especial en el HLE.
+
+CAPA 2 - PROTECTION BITS DENTRO DEL HLE:
+    Cuando un binario llama SetProtection("SYS:C/Dir", FIBF_DELETE):
+
+    Opcion A - Mapear a permisos Linux reales (FIBF_READ->S_IRUSR,
+    FIBF_WRITE->S_IWUSR, FIBF_EXECUTE->S_IXUSR, FIBF_DELETE->S_IWUSR
+    en el directorio). Funciona pero es aproximado.
+
+    Opcion B - Extended attributes (xattr) - RECOMENDADA:
+
+        xattr::set(path, "user.amicachy.protection", &bits.to_be_bytes())?;
+
+    El fichero mantiene permisos Linux normales; los protection
+    bits AmigaOS son metadata adicional via xattr leida/escrita por
+    amicachy-dos. Desacopla completamente ambos sistemas, semantica
+    exacta.
+
+CAPA 3 - MODELO MULTIUSUARIO:
+
+    Modelo A - Un unico usuario "amiga" (mas fiel al original, SIN
+    multiusuario dentro del HLE, como AmigaOS real). RECOMENDADO
+    PARA EL ARRANQUE: AmiCachy como "appliance" de un solo usuario,
+    un PC = un usuario, sin complicaciones.
+
+    Modelo B - Mapear usuarios Linux a "usuarios" AmiCachy: cada
+    usuario Linux tiene ~/AmiCachy/ propio; System/ compartido en
+    solo lectura; solo amicachy-admin instala en System.
+
+        /opt/amicachy/System/    drwxr-xr-x  amicachy-admin:amicachy-admin
+        /opt/amicachy/Storage/   drwxr-xr-x  (instalacion compartida de paquetes)
+        ~/AmiCachy/              drwx------  (ficheros personales por usuario)
+            +-- ENV/
+            +-- ENVARC/
+            +-- Work/
+
+ARBOL DE PERMISOS RECOMENDADO (Modelo A):
+
+    /opt/amicachy/                drwxr-xr-x  amiga:amiga
+    +-- System/                   drwxr-xr-x  amiga:amiga (lectura para todos)
+    |   +-- C/                    drwxr-xr-x  amiga:amiga
+    |   +-- Libs/                 drwxr-xr-x  amiga:amiga
+    |   +-- Prefs/Env-Archive/    drwx------  amiga:amiga (privado)
+    +-- Storage/Programs/         drwxrwxr-x  amiga:amiga (acp instala aqui)
+    +-- RAM/ -> tmpfs              drwxrwxrwt  amiga:amiga (sticky, como /tmp)
+    +-- User/                     drwx------  amiga:amiga (privado)
+
+acp install NO requiere sudo - todo va a
+/opt/amicachy/Storage/Programs/, propiedad de "amiga". Igual que
+en AmigaOS real: descargas, ejecutas, sin permisos especiales.
+
+UNICO CASO QUE NECESITA PRIVILEGIOS: actualizar el sistema base
+(kernel CachyOS, amicachy-compositor, amicachy-exec). Gestionado
+por acp de forma transparente:
+
+    acp update          # paquetes de usuario, sin sudo
+    acp upgrade-system  # sistema base, pide contrasena
+
+    El usuario nunca ve sudo/terminal - ve un dialogo estilo
+    AmigaOS:
+
+    +---------------------------------------+
+    |  Sistema AmiCachy                     |
+    |                                       |
+    |  Actualizar el sistema requiere       |
+    |  confirmacion de administrador.       |
+    |                                       |
+    |  Contrasena: [____________]           |
+    |                                       |
+    |  [Continuar]        [Cancelar]        |
+    +---------------------------------------+
+
+    Por debajo: pkexec o sudo -S.
+
+TABLA RESUMEN:
+
+    Concepto            | AmigaOS          | AmiCachy-HLE
+    --------------------------------------------------------------------
+    Permisos de fichero | No existen       | Permisos Linux sobre
+                         |                  | /opt/amicachy, invisibles
+    Protection bits     | 8 bits           | Almacenados en xattr,
+                         | informativos     | semantica exacta
+    Multiusuario        | No existe        | Un solo usuario "amiga",
+                         |                  | como el original
+    Instalar software   | Copiar ficheros  | acp install, sin sudo,
+                         |                  | a /opt/amicachy/Storage/
+    Operaciones sistema | No existe        | acp upgrade-system con
+                         | distincion       | dialogo visual, sin terminal
+
+FILOSOFIA: Linux gestiona la seguridad real por debajo, AmiCachy
+presenta la simplicidad de AmigaOS por arriba. El usuario solo ve
+permisos Unix si abre una terminal Linux explicitamente.
+
+
+------------------------------------------------------------------
+15. ARRANQUE: STARTUP-SEQUENCE Y CICLO DE BOOT
+------------------------------------------------------------------
+
+ESTRUCTURA CLASICA DE AMIGAOS:
+    S:startup-sequence  -> script principal de arranque
+    S:user-startup      -> personalizaciones del usuario (no tocar
+                            el principal)
+
+    En AmiCachy el "ejecutor" de estos scripts es amicachy-dos.
+
+CADENA DE ARRANQUE COMPLETA:
+
+    BIOS/UEFI
+        |
+    systemd-boot (ya existe en AmiCachy)
+        |
+    Plymouth (logo AmiCachy)
+        |
+    systemd (CachyOS base)
+        |
+    amicachy-early.service    <- monta tmpfs, prepara /run/amicachy
+        |
+    amicachy-assigns.service  <- inicializa AssignTable
+        |
+    amicachy-desktop          <- proceso principal (Smithay + HLE)
+        |
+    startup-sequence          <- ejecutado por amicachy-dos
+        |
+    Escritorio AmiCachy visible
+
+UNIT DE SYSTEMD - amicachy-early.service:
+
+    [Unit]
+    Description=AmiCachy early environment
+    Before=amicachy-desktop.service
+    After=local-fs.target
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=/opt/amicachy/Native/bin/amicachy-init
+    User=amiga
+
+    [Install]
+    WantedBy=amicachy-desktop.service
+
+amicachy-init (Rust) hace 3 cosas:
+
+    fn main() {
+        // 1. Monta RAM: como tmpfs
+        mount("tmpfs", "/run/amicachy", "tmpfs", MS_NOEXEC, "size=256M");
+
+        // 2. Crea estructura de RAM:
+        fs::create_dir_all("/run/amicachy/env").unwrap();
+        fs::create_dir_all("/run/amicachy/tmp").unwrap();
+
+        // 3. Copia ENV: desde ENVARC: (persistente -> volatil)
+        copy_dir(
+            "/opt/amicachy/System/Prefs/Env-Archive",
+            "/run/amicachy/env"
+        );
+    }
+
+    (equivalente exacto a lo que hace AmigaOS real al arrancar)
+
+STARTUP-SEQUENCE (ejemplo):
+
+    ; AmiCachy Startup-Sequence
+    ; No editar - usar User-Startup para personalizaciones
+
+    ; Asignar directorios estandar
+    Assign >NIL: C: SYS:C
+    Assign >NIL: S: SYS:S
+    Assign >NIL: LIBS: SYS:Libs
+    Assign >NIL: DEVS: SYS:Devs
+    Assign >NIL: FONTS: SYS:Fonts
+    Assign >NIL: T: RAM:T
+    Assign >NIL: ENV: RAM:Env
+    Assign >NIL: ENVARC: SYS:Prefs/Env-Archive
+
+    ; Arrancar subsistemas
+    Run >NIL: amicachy-audio        ; Paula -> PipeWire
+    Run >NIL: amicachy-input        ; libinput -> input.device
+    Run >NIL: amicachy-net          ; bsdsocket.library
+
+    ; Cargar fuentes del sistema
+    LoadFont >NIL: FONTS:Topaz/8
+    LoadFont >NIL: FONTS:Diamond/8
+
+    ; Leer preferencias
+    GetEnv Workbench/ScreenMode >ENV:T/screenmode
+
+    ; Ejecutar personalizaciones del usuario
+    Execute S:User-Startup
+
+    ; Arrancar el escritorio
+    LoadWB
+
+    Cada comando (Assign, Run, Execute, LoadWB...) lo implementa
+    amicachy-dos como comando de C: igual que en AmigaOS real.
+
+LoadWB - PUNTO DE ARRANQUE DEL ESCRITORIO:
+
+    // C:/LoadWB implementado en amicachy-dos
+    pub fn load_wb(args: &[&str]) -> Result<()> {
+        // Senala a amicachy-desktop que el startup ha terminado
+        ipc::send(DesktopIpc::StartupComplete {
+            screen_mode: env::get("Workbench/ScreenMode"),
+            backdrop:    env::get("Workbench/Backdrop"),
+        })?;
+        Ok(())
+    }
+
+    Hasta LoadWB, el compositor solo muestra Plymouth. Al recibir
+    StartupComplete, aparece el escritorio (misma transicion visual
+    que AmigaOS real).
+
+USER-STARTUP (personalizaciones del usuario, nunca tocar el
+script principal):
+
+    ; S:User-Startup
+
+    ; Anadir mis programas al path
+    Assign >NIL: Work: User:Documents
+    Assign >NIL: Music: User:Music
+
+    ; Variables personales
+    SetEnv Editor "SYS:C/Ed"
+    SetEnv Browser "Storage:Programs/IBrowse/IBrowse"
+
+    ; Programas que arrancan con el sistema
+    Run >NIL: Storage:Programs/Dopus5/DOpus
+
+    acp install puede anadir lineas a User-Startup automaticamente
+    (con permiso/dialogo al usuario) cuando un paquete necesita
+    arrancar al inicio.
+
+SHELL DE AMICACHY (amicachy-shell):
+    Binario nativo x86 que implementa la SINTAXIS del shell de
+    AmigaOS (NewShell), NO bash/zsh:
+
+        1.AmiCachy> Dir SYS:C
+        1.AmiCachy> Copy Work:fichero TO RAM:
+        1.AmiCachy> Run >NIL: Storage:Programs/DOpus5/DOpus
+        1.AmiCachy>
+
+    Dir en lugar de ls, Copy en lugar de cp, Delete en lugar de rm,
+    pipes con "|", redireccion con ">"/">>", etc. Por debajo
+    traduce a syscalls Linux pero el usuario ve shell AmigaOS. Si
+    quiere bash, abre terminal Linux explicito desde el menu de
+    herramientas (no es el default).
+
+PREFERENCIAS PERSISTENTES (sistema ENV completo):
+
+    ENVARC:
+    +-- Workbench/
+    |   +-- ScreenMode      <- "1920x1080x32"
+    |   +-- Backdrop        <- "LIBS:backdrops/amicachy.iff"
+    |   +-- WBPattern       <- patron del fondo
+    +-- Sys/
+    |   +-- NoCapsLock      <- existe = feature activa
+    |   +-- Language        <- "espanol"
+    +-- Font/
+    |   +-- screen.font     <- "Diamond/8"
+    |   +-- system.font     <- "Topaz/8"
+    +-- amicachy/
+        +-- compositor.prefs
+        +-- sound.prefs
+
+    Cada fichero: texto plano o binario IFF segun tipo.
+    amicachy-desktop los lee al arrancar via GetEnv. Paneles de
+    Preferencias escriben via SetEnv + SaveENV (sincroniza
+    ENV: -> ENVARC:).
+
+TIEMPOS DE ARRANQUE ESTIMADOS (hardware moderno, CachyOS):
+
+    0.0s  UEFI -> systemd-boot
+    0.8s  Plymouth visible (logo AmiCachy)
+    1.2s  amicachy-early: tmpfs montado, ENV: inicializado
+    1.4s  amicachy-desktop arranca: Smithay/DRM/KMS activo
+    1.6s  startup-sequence comienza
+    1.8s  subsistemas audio/input/red arrancados
+    2.0s  LoadWB -> escritorio visible
+
+    ~2 segundos de encendido a escritorio - comparable a un Amiga
+    real con acelerador rapido, mas rapido que distros Linux
+    convencionales.
+
+APAGADO (AmigaOS no tiene apagado formal; AmiCachy si para
+sincronizar ENV: -> ENVARC:):
+
+    ; S:shutdown-sequence
+    SaveENV                          ; ENV: -> ENVARC: (persistir)
+    amicachy-audio --quit            ; flush buffers de audio
+    amicachy-net --quit              ; cerrar conexiones
+    ; systemd se encarga del resto
+
+    Dialogo visual al usuario:
+
+    +-------------------------------+
+    |                                |
+    |   ¿Apagar AmiCachy?            |
+    |                                |
+    |   [Apagar]  [Reiniciar]        |
+    |   [Cancelar]                   |
+    |                                |
+    +-------------------------------+
+
+
+------------------------------------------------------------------
+16. ESTADO ACTUAL / PROXIMOS PASOS
+------------------------------------------------------------------
+
+CON TODO LO ANTERIOR, AmiCachy-HLE como sistema completo cubriria:
+
+    - Boot silencioso de ~2 segundos
+    - Sistema de ficheros con semantica AmigaOS completa
+    - Assigns, ENV, protection bits via xattr
+    - startup-sequence y user-startup reales
+    - Shell con sintaxis AmigaOS
+    - Subsistemas de audio, red, impresion, clipboard
+    - Gestion de paquetes con acp para 68k y x86 (Aminet + repo propio)
+    - DASH como lenguaje de desarrollo cross-target (68k/x86/aarch64)
+    - Todo confinado en /opt/amicachy, invisible para Linux
+
+PENDIENTE DE DECIDIR/EXPLORAR (siguientes conversaciones):
+
+    - Estructura concreta del workspace de Cargo que une todas las
+      piezas (musashi-sys, amicachy-exec, amicachy-dos,
+      amicachy-intuition, amicachy-compositor, amicachy-shell,
+      amicachy-desktop, acp, amicachy-init, etc.)
+    - Diseno del panel de Preferencias de Assigns
+    - Contenido de lib/amiga/ y ejemplo "blixel" en el repo de DASH
+      (para planificar el refactor builtins/base.py + target_*.py)
+    - Implementacion de los callbacks de memoria de Musashi en
+      detalle
+    - PKGBUILD y entrada de boot (amiga-hle.conf / amicachy-hle.target)
+      para el nuevo modo, siguiendo el patron de pkg/amiberry/
+
+REFERENCIAS DE PROYECTOS:
+    - AmiCachy: github.com/FreeMEM/AmiCachy/
+    - DASH: github.com/FreeMEM/dash/
+    - Musashi: core 68k en C, maduro, usar via FFI/bindgen
+    - Smithay: github.com/Smithay/smithay (compositores: smallvil
+      para empezar, anvil como referencia completa DRM/KMS/XWayland)
+    - AROS: referencia de reimplementacion source-compatible de
+      AmigaOS 3.1 para x86
+    - Leak AmigaOS 3.1 (2015, confirmado por Hyperion): NO usar como
+      base de codigo por riesgo legal/contaminacion de clean room
+
+==================================================================
+FIN DEL DOCUMENTO
+==================================================================
