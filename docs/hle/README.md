@@ -59,6 +59,7 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
 | [05-arranque-y-shell.md](05-arranque-y-shell.md) | Cadena de boot, units systemd, startup-sequence, LoadWB, amicachy-shell, apagado |
 | [06-dash-cross-target.md](06-dash-cross-target.md) | DASH como lenguaje cross-target (68k/x86_64/aarch64/wasm), libamicachy-intuition |
 | [07-paquetes-y-repositorios.md](07-paquetes-y-repositorios.md) | Gestor `acp`, formato `.acz`, Aminet, repo overlay pacman, hosting |
+| [08-jit-cpu-68k.md](08-jit-cpu-68k.md) | JIT para la CPU 68k (fase 2): Musashi interpretado vs Cranelift, trampolines jump table, niveles de JIT, roadmap |
 
 ## 4. Stack tecnológico (resumen)
 

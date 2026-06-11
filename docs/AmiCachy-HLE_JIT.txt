@@ -1,0 +1,199 @@
+==================================================================
+AMICACHY-HLE - JIT PARA LA CPU 68K (MUSASHI vs ALTERNATIVAS)
+==================================================================
+
+------------------------------------------------------------------
+1. PUNTO DE PARTIDA: MUSASHI INTERPRETADO
+------------------------------------------------------------------
+
+Musashi es un interpretador de tabla de saltos: cada opcode 16-bit
+tiene una funcion C que lo decodifica e implementa, indexada por
+una tabla de 65536 entradas. Es maduro, estable, facil de integrar
+via FFI/bindgen, y su modelo de callbacks de memoria hace TRIVIAL
+interceptar accesos para el HLE:
+
+    fn memory_read(address: u32) -> u32 {
+        if is_library_jump_table(address) {
+            return dispatch_to_rust_implementation(address);
+        }
+        ram[address as usize]
+    }
+
+Para la mayoria de software (apps, utilidades, Workbench, Intuition)
+esto es mas que suficiente: el 68k original corria a 7-50MHz y un
+interpretado en hardware moderno tiene margen de sobra. El cuello
+de botella estaria en el renderer o en las librerias AmigaOS, no
+en la CPU.
+
+
+------------------------------------------------------------------
+2. EL CASO QUE CAMBIA LA ECUACION: LIGHTWAVE 5
+------------------------------------------------------------------
+
+Caso real: una escena que en Amiberry (con JIT) tarda 7 segundos
+en renderizar, en modo interpretado tardaria del orden de 2 minutos.
+
+Por que LightWave es distinto al resto del software:
+
+    - El renderizado es basicamente millones de iteraciones de
+      bucles aritmeticos (punto fijo/flotante)
+    - Practicamente SIN llamadas a AmigaOS durante el calculo
+      (quizas un Wait() ocasional para refrescar progreso)
+    - Es el caso opuesto a abrir una ventana en Intuition, donde
+      la mayoria de instrucciones son saltos a la jump table
+
+Conclusion: para cargas CPU-bound como esta, interpretado SI es
+un problema real y medible, y un JIT aporta una diferencia de
+orden de magnitud (2 min -> 7 seg).
+
+
+------------------------------------------------------------------
+3. EL CONFLICTO JIT vs INTERCEPCION HLE (Y SU SOLUCION)
+------------------------------------------------------------------
+
+PROBLEMA GENERAL CON JIT:
+Un interpretador ejecuta instruccion a instruccion, por lo que
+CADA acceso a memoria pasa por tus callbacks - interceptar saltos
+a la jump table de AmigaOS es natural.
+
+Con JIT, un bloque de codigo 68k se traduce UNA VEZ a codigo nativo
+y se ejecuta directamente en repeticiones posteriores SIN pasar
+por callbacks. Si ese bloque contiene un JSR a la jump table, el
+JIT necesitaria "saber" de antemano que esa direccion es especial.
+
+LA SOLUCION - TRAMPOLINES EN DIRECCIONES CONOCIDAS:
+
+Las direcciones de la jump table de AmigaOS son FIJAS y conocidas
+de antemano (definidas en la NDK). El JIT, al traducir un bloque,
+puede detectar si contiene un JSR/JMP a una de esas direcciones
+conocidas y generar una LLAMADA A RUST en vez de codigo nativo de
+salto:
+
+    Traduccion de bloque 68k -> x86:
+
+       MOVE.L D0,-(A7)       -> mov [rsp-4], eax   (codigo nativo normal)
+       JSR -552(A6)          -> call rust_dispatch_OpenLibrary  (trampolin)
+       ADDQ.L #4,A7          -> add rsp, 4
+
+RESULTADO: el bloque sigue siendo codigo nativo rapido para el
+99% de las instrucciones (la aritmetica del raytracer), y solo
+las llamadas a sistema (poco frecuentes en cargas CPU-bound como
+LightWave) hacen el salto a Rust. Esto es justo lo que se necesita:
+maxima velocidad en computo, intercepcion solo donde hay
+interaccion real con AmigaOS.
+
+
+------------------------------------------------------------------
+4. NIVELES DE "JIT" POSIBLES (DE MENOS A MAS COMPLEJO)
+------------------------------------------------------------------
+
+NIVEL 1 - Cache de bloques basicos (threaded interpretation):
+    En vez de decodificar cada instruccion cada vez, se decodifica
+    un bloque una vez y se guarda un array de punteros a funcion
+    ya resueltos. Sigue siendo interpretado, pero evita el overhead
+    de re-decodificacion. Mejora ~20-40%. Relativamente factible,
+    sin romper el modelo de callbacks de Musashi.
+
+NIVEL 2 - Dynarec simple (traduccion 1:1):
+    Por cada instruccion 68k se genera la secuencia equivalente de
+    instrucciones x86/ARM, sin optimizar entre instrucciones (lo
+    que hace Cyclone68000). Trabajo grande: backend de generacion
+    de codigo, allocation de registros (D0-D7/A0-A7 -> registros
+    x86 o memoria), manejo de flags (no se mapean 1:1 con x86),
+    invalidacion de cache para self-modifying code (comun en demos
+    Amiga).
+
+NIVEL 3 - JIT optimizante real (estilo UAE JIT, DOSBox dynrec,
+LLVM/Cranelift con optimizaciones):
+    Analisis de bloques, allocation de registros entre
+    instrucciones, eliminacion de calculos de flags redundantes,
+    etc. Proyecto de meses/anos por si solo - UAE JIT lleva 20+
+    anos de iteracion.
+
+
+------------------------------------------------------------------
+5. OPCIONES DE IMPLEMENTACION CONCRETAS
+------------------------------------------------------------------
+
+OPCION A - Extraer el JIT de UAE (WinUAE/FS-UAE/Amiberry)
+    Ya existe, ya da los resultados (7s en LightWave). Pero:
+    - Muy acoplado al resto de UAE (timing de ciclos, hardware
+      emulation) - extraerlo limpio seria casi tanto trabajo como
+      escribir uno nuevo
+    - Tambien necesitaria los mismos trampolines de jump table
+    - Licencia GPL podria condicionar la integracion en AmiCachy
+    NO RECOMENDADA como via directa.
+
+OPCION B - Cranelift (RECOMENDADA)
+    - Backend de compilacion en Rust, usado por Wasmtime
+    - En vez de escribir un dynarec 68k->x86 a mano, se escribe un
+      traductor 68k -> Cranelift IR; Cranelift se encarga de:
+        - generacion de codigo nativo
+        - allocation de registros
+        - parte de las optimizaciones
+    - Encaja naturalmente con el resto del stack en Rust
+    - El trampolin de jump table se implementa en el traductor:
+      al traducir un JSR, comprobar si el target es una direccion
+      conocida de AmigaOS y emitir una llamada directa a la funcion
+      Rust correspondiente en vez de traducir el salto
+    - Trabajo acotado: ~80 instrucciones base del 68k a traducir a
+      IR, no miles
+
+
+------------------------------------------------------------------
+6. ROADMAP RECOMENDADO
+------------------------------------------------------------------
+
+FASE 1 (ahora - desarrollo del HLE):
+    Musashi interpretado para todo: amicachy-exec, amicachy-dos,
+    amicachy-intuition, etc. El rendimiento no es el foco; lo que
+    importa es tener el contrato de AmigaOS funcionando.
+
+FASE 2 (cuando el HLE basico funcione):
+    Explorar Cranelift como JIT OPCIONAL para la CPU 68k:
+        - Traductor 68k -> Cranelift IR (proyecto serio pero
+          acotado, ~80 instrucciones base)
+        - Trampolines hacia Rust en las direcciones de jump table
+          conocidas (NDK de AmigaOS)
+        - Modo "JIT" activable por aplicacion, o detectado
+          automaticamente (apps con poco I/O a sistema -tipo
+          renderers, raytracers- se benefician mas)
+
+ARQUITECTURA RESULTANTE:
+
+    amicachy-hle
+    +-- cpu::interpreted (Musashi)
+    |     -> modo normal, maxima compatibilidad,
+    |        intercepcion HLE trivial via callbacks
+    +-- cpu::jit (traductor 68k -> Cranelift IR)
+          -> modo "performance" para apps CPU-bound conocidas
+             (LightWave y similares)
+          -> trampolines a Rust en direcciones de jump table
+             conocidas para mantener compatibilidad HLE
+
+
+------------------------------------------------------------------
+7. CONCLUSION
+------------------------------------------------------------------
+
+- Musashi interpretado: suficiente y correcto para el grueso del
+  ecosistema (Workbench, apps, utilidades) y para todo el
+  desarrollo inicial del HLE.
+
+- JIT (via Cranelift) se justifica para cargas CPU-bound concretas
+  como LightWave 5, donde la diferencia es de orden de magnitud
+  (2 min -> 7 seg).
+
+- El "conflicto" entre JIT e intercepcion HLE se resuelve con
+  trampolines hacia Rust en las direcciones conocidas de la jump
+  table de AmigaOS - el JIT detecta esos saltos en tiempo de
+  traduccion del bloque y emite llamadas directas en vez de codigo
+  nativo de salto.
+
+- Es un proyecto serio (meses, no semanas) pero acotado y con
+  objetivo medible, a abordar en una FASE 2 una vez el HLE basico
+  (exec/dos/intuition sobre Musashi interpretado) este funcionando.
+
+==================================================================
+FIN DEL DOCUMENTO
+==================================================================

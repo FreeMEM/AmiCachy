@@ -13,6 +13,11 @@ scheduler, tasks/señales/mensajes, modelo de memoria y protección de memoria.
 | 4 | graphics.library + blitter | Decisión: emular blitter píxel a píxel (correcto, lento) vs interceptar y reimplementar con primitivas modernas (rápido, más complejo). **Recomendación:** interceptar las llamadas de graphics.library y reimplementar con wgpu; NO emular copper/blitter a nivel hardware desde el día 1. |
 | 5 | MUI (`amicachy-mui`) | Librería de Stefan Stuntz, modelo de clases BOOPSI. Más compleja pero desacoplada — dejar para el final. |
 
+> **Rendimiento de la CPU:** Musashi interpretado es suficiente para todo el desarrollo
+> inicial y para el grueso del software. Para cargas CPU-bound (renderers tipo
+> LightWave 5) se contempla un JIT opcional vía Cranelift en una fase 2; ver
+> [08-jit-cpu-68k.md](08-jit-cpu-68k.md).
+
 ## 2. Multinúcleo y multihilo
 
 ### El problema fundamental
