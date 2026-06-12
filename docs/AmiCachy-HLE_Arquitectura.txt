@@ -45,8 +45,11 @@ AmiCachy:
     - amicachy-compositor
     - amicachy-exec      (exec.library)
     - amicachy-dos       (dos.library)
-    - amicachy-intuition (intuition + graphics.library)
-    - amicachy-mui       (MUI)
+    - amicachy-intuition (intuition + graphics.library + BOOPSI;
+                          incluye gadtools.library y las clases
+                          ReAction - los toolkits que emite DASH)
+    - amicachy-mui       (MUI; toolkit aparte para software clasico
+                          externo)
     - amicachy-shell
     - amicachy-desktop   (proceso principal)
 
@@ -71,6 +74,10 @@ Capa 3 - dos.library + intuition.library
     - dos.library mapea bien a POSIX
     - intuition.library: screens, windows, gadgets, layers/rastports
       -> trabajo grande
+    - Incluye la infraestructura BOOPSI (registro de clases,
+      NewObject/DisposeObject, SetAttrs/GetAttr, DoMethod): cimiento
+      comun imprescindible para ReAction y MUI; construirla desde
+      esta capa
 
 Capa 4 - graphics.library + blitter
     - Decision: emular blitter pixel a pixel (correcto, lento) vs
@@ -80,17 +87,42 @@ Capa 4 - graphics.library + blitter
       reimplementar con wgpu, NO emular copper/blitter a nivel
       hardware desde el dia 1
 
+Capa 4.5 - gadtools.library + ReAction (clases BOOPSI)
+    - Toolkits de widgets que EMITE nuestro propio compilador DASH
+      (gt_* -> GadTools, ra_* -> ReAction). No son librerias
+      independientes: se construyen SOBRE Intuition.
+    - GadTools: wrapper de los gadgets de Intuition (necesita la
+      VisualInfo del screen). El mas barato una vez Intuition es
+      usable: CreateGadget, GT_GetGadgetAttrs/GT_SetGadgetAttrs,
+      bucle GT_GetIMsg/GT_ReplyIMsg.
+    - ReAction: conjunto de gadget classes BOOPSI (window.class,
+      layout.gadget, button.gadget, string.gadget, integer.gadget,
+      checkbox.gadget, slider.gadget, chooser.gadget, scroller.gadget,
+      palette.gadget, space.gadget + grupos de layout h/v con pesos).
+      El layout automatico es lo no trivial.
+    - PRIORIDAD ALTA para el ecosistema AmiCachy: es lo que ejecutan
+      las apps generadas con DASH. La lista canonica a cubrir es
+      GADTOOLS_FUNCTIONS + REACTION_FUNCTIONS en
+      compiler/amiga_builtins.py del repo FreeMEM/dash (15 + 62 fns).
+
 Capa 5 - MUI (amicachy-mui)
-    - Libreria de Stefan Stuntz, modelo de clases BOOPSI
+    - Libreria de Stefan Stuntz, modelo de clases BOOPSI propio
+      (muimaster.library), independiente de ReAction
     - Mas compleja pero desacoplada - dejar para el final
+    - Necesaria para el grueso del software CLASICO EXTERNO (la
+      mayoria de apps Amiga serias usan MUI), no para lo que produce
+      DASH; por eso va DESPUES de GadTools/ReAction
 
 ORDEN DE DESARROLLO RECOMENDADO:
     Mes 1-2: musashi-sys + binario 68k de test + exec minimo
              (AllocMem, tareas, senales)
     Mes 3-4: dos.library suficiente para CLI (arrancar una shell
              de AmigaOS ya es un hito demostrable)
-    Mes 5-6: Intuition basico sobre wgpu - ventanas, eventos, sin MUI
-    Mes 7+:  Workbench/escritorio, MUI, Paula (audio)
+    Mes 5-6: Intuition basico sobre wgpu - ventanas, eventos,
+             BOOPSI + GadTools (gadgets nativos)
+    Mes 7+:  Workbench/escritorio, ReAction (toolkit principal de
+             DASH), Paula (audio); MUI mas adelante (software clasico
+             externo)
 
 PRIMER PR CONCRETO SUGERIDO:
     pkg/amiga-hle/ (o amicachy-hle/) con un amicachy-desktop minimo
@@ -304,7 +336,10 @@ ORDEN SUGERIDO:
        XWayland opcional)
     3. Ventanas HLE: primer binario 68k corriendo en el shell
     4. Sistema de Preferencias declarativo
-    5. MUI (cuando Intuition este solido)
+    5. GadTools y ReAction sobre Intuition/BOOPSI (es lo que emite
+       DASH)
+    6. MUI (amicachy-mui), al final - compatibilidad con software
+       clasico externo
 
 SISTEMA DE CONFIGURACION (no estilo GNOME/dconf):
     Fichero declarativo simple, ej. ~/.amicachy/prefs.toml:
