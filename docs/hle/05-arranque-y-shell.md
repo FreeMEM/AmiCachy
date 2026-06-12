@@ -4,6 +4,14 @@ Cubre: la cadena de arranque completa, units de systemd, `amicachy-init`,
 startup-sequence/user-startup, `LoadWB`, `amicachy-shell`, preferencias persistentes y
 apagado.
 
+> **Revisión de arranque.** Al pasar `amicachy-hle` a escritorio multi-distro
+> ([09-escritorio-independiente.md](09-escritorio-independiente.md) §3), el camino de
+> arranque por defecto en una distro genérica es como **sesión Wayland** lanzada por el
+> display manager (`.desktop` en `/usr/share/wayland-sessions/`), no por units de systemd
+> propias. La cadena con units que se describe aquí sigue siendo válida para el arranque
+> tipo *appliance* de la ISO de AmiCachy (boot directo a `amicachy-desktop` sin greeter).
+> Las rutas `/opt/amicachy` de los ejemplos se trasladan al layout FHS/XDG del doc 09.
+
 ## 1. Estructura clásica de AmigaOS
 
 - `S:startup-sequence` → script principal de arranque.

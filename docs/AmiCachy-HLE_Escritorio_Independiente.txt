@@ -1,0 +1,271 @@
+==================================================================
+AMICACHY-HLE COMO ESCRITORIO INDEPENDIENTE
+(instalable en cualquier Linux, repo propio FreeMEM/amicachy-hle)
+==================================================================
+
+------------------------------------------------------------------
+1. CAMBIO DE ENFOQUE
+------------------------------------------------------------------
+
+HASTA AHORA: amicachy-hle se habia disenado como parte integral de
+AmiCachy (paquete en pkg/, entrada de boot propia, systemd units
+especificas, todo bajo /opt/amicachy).
+
+NUEVO ENFOQUE: amicachy-hle se convierte en un ENTORNO DE ESCRITORIO
+empaquetable y distribuible, igual que GNOME/KDE/Sway - instalable
+en cualquier distro Linux, no solo en la ISO de AmiCachy.
+
+    amicachy-hle (repo independiente, distribuible)
+        |
+        +-- Funciona standalone en cualquier distro
+        +-- AmiCachy lo consume como "uno de sus modos de boot",
+            pero ya no es exclusivo de AmiCachy
+
+MISMO PATRON QUE DASH:
+    FreeMEM/AmiCachy      <- ISO (CachyOS + Amiberry + modos de boot)
+    FreeMEM/dash           <- lenguaje, repo independiente
+    FreeMEM/amicachy-hle   <- escritorio HLE, repo independiente
+
+    AmiCachy (la ISO) anade amicachy-hle como una opcion mas de
+    boot, instalandolo como paquete - exactamente igual que
+    cualquier otra distro que quiera ofrecerlo.
+
+
+------------------------------------------------------------------
+2. LO QUE NO CAMBIA (logica HLE agnostica de distro)
+------------------------------------------------------------------
+
+Toda la logica de emulacion/HLE disenada hasta ahora sigue igual,
+es independiente de donde se instale:
+
+    - amicachy-compositor (Smithay) - DRM/KMS/libinput son APIs
+      del kernel, no de la distro
+    - amicachy-exec, amicachy-dos, amicachy-intuition - logica
+      AmigaOS reimplementada en Rust
+    - Musashi (CPU 68k via FFI) y el futuro JIT via Cranelift
+    - Semantica de assigns, ENV, protection bits via xattr
+    - DASH como lenguaje cross-target (68k/x86/aarch64)
+    - acp para paquetes 68k (Aminet + repo propio) - vive en el
+      home del usuario, completamente independiente de la distro
+
+LO UNICO QUE CAMBIA: DONDE viven fisicamente los ficheros (rutas
+base), y COMO se integra con el sistema de sesiones del Linux host.
+
+
+------------------------------------------------------------------
+3. INTEGRACION COMO SESION DE ESCRITORIO (display manager)
+------------------------------------------------------------------
+
+GNOME/KDE/Sway se registran como sesiones que GDM/SDDM/LightDM
+pueden lanzar. amicachy-hle hace lo mismo via un fichero .desktop
+de sesion Wayland:
+
+    # /usr/share/wayland-sessions/amicachy-hle.desktop
+    [Desktop Entry]
+    Name=AmiCachy HLE
+    Comment=AmigaOS-inspired desktop environment
+    Exec=amicachy-desktop
+    Type=Application
+    DesktopNames=AmiCachy
+
+Con esto, GDM/SDDM/lightdm-greeter muestran "AmiCachy HLE" en el
+selector de sesion junto a GNOME, KDE, Sway, etc. El compositor
+Smithay (amicachy-desktop) arranca como una sesion Wayland normal,
+lanzada por el display manager del sistema host.
+
+
+------------------------------------------------------------------
+4. LAYOUT DE DIRECTORIOS: FHS + XDG BASE DIRECTORY
+------------------------------------------------------------------
+
+CAMBIO MAS IMPORTANTE: abandonar /opt/amicachy (tenia sentido para
+una ISO autocontenida) y adoptar las rutas estandar que CUALQUIER
+distro Linux espera (FHS para ficheros de sistema, XDG Base
+Directory para datos de usuario).
+
+LAYOUT PROPUESTO:
+
+    /usr/bin/amicachy-desktop          <- binarios del sistema
+    /usr/bin/amicachy-compositor
+    /usr/bin/amicachy-shell
+    /usr/bin/acp
+
+    /usr/lib/amicachy/                 <- librerias compartidas
+        +-- libamicachy-intuition.so
+        +-- libamicachy-exec.so
+        +-- (resto de .so del runtime HLE)
+
+    /usr/share/amicachy/               <- "System:" de solo lectura
+        +-- C/                         <- C: (comandos 68k)
+        +-- Libs/                      <- LIBS:
+        +-- Devs/                      <- DEVS:
+        +-- Fonts/                     <- FONTS:
+        +-- Prefs/Env-Archive/         <- DEFAULTS de fabrica
+                                           (no el ENVARC: del usuario)
+
+    /usr/share/wayland-sessions/
+        +-- amicachy-hle.desktop       <- entrada de sesion
+
+    --- datos de usuario (XDG) ---
+
+    ~/.local/share/amicachy/           <- datos persistentes del usuario
+        +-- ENVARC/                    <- preferencias persistentes
+        +-- Storage/Programs/          <- acp install aqui (68k y nativos)
+        +-- User/                      <- Work:, Documents, Pictures, Music
+
+    ~/.cache/amicachy/                 <- opcional: T:/RAM: persistido
+                                           entre sesiones si se desea
+
+    /run/user/$UID/amicachy/           <- RAM:, ENV: (tmpfs por usuario,
+                                           via XDG_RUNTIME_DIR; volatil,
+                                           se recrea cada sesion)
+
+EQUIVALENCIA CON LOS ASSIGNS DE AMIGAOS (sin cambios para el
+usuario - sigue viendo SYS:, LIBS:, Work:, etc.):
+
+    Assign AmigaOS   | Ruta fisica (nuevo layout FHS/XDG)
+    -----------------------------------------------------------------
+    SYS:             | /usr/share/amicachy/
+    C:               | /usr/share/amicachy/C/
+    LIBS:            | /usr/share/amicachy/Libs/
+    DEVS:            | /usr/share/amicachy/Devs/
+    FONTS:           | /usr/share/amicachy/Fonts/
+    ENVARC:          | ~/.local/share/amicachy/ENVARC/
+    ENV:             | /run/user/$UID/amicachy/Env/
+    RAM:             | /run/user/$UID/amicachy/
+    T:               | /run/user/$UID/amicachy/T/
+    Storage:Programs | ~/.local/share/amicachy/Storage/Programs/
+    User:            | ~/.local/share/amicachy/User/
+    Work:            | configurable, por defecto ~/.local/share/amicachy/User/Documents
+
+IMPLEMENTACION EN AssignTable (amicachy-dos):
+
+    impl AssignTable {
+        pub fn default() -> Self {
+            let share   = PathBuf::from("/usr/share/amicachy");
+            let data    = dirs::data_dir().unwrap().join("amicachy");    // ~/.local/share/amicachy
+            let runtime = dirs::runtime_dir().unwrap().join("amicachy"); // /run/user/$UID/amicachy
+
+            let mut t = HashMap::new();
+            t.insert("SYS",    share.clone());
+            t.insert("C",      share.join("C"));
+            t.insert("LIBS",   share.join("Libs"));
+            t.insert("DEVS",   share.join("Devs"));
+            t.insert("FONTS",  share.join("Fonts"));
+            t.insert("ENVARC", data.join("ENVARC"));
+            t.insert("ENV",    runtime.join("Env"));
+            t.insert("T",      runtime.join("T"));
+            t.insert("RAM",    runtime.clone());
+            t.insert("User",   data.join("User"));
+            t.insert("Work",   data.join("User/Documents"));
+            t
+        }
+        // resolve() sin cambios respecto al diseno original
+    }
+
+EXPERIENCIA DE USUARIO: IDENTICA. El usuario sigue viendo SYS:,
+LIBS:, Work:, ENVARC:, etc. exactamente igual que en el diseno
+original sobre /opt/amicachy. Solo cambia donde apuntan
+fisicamente esas rutas, ahora siguiendo el estandar de cualquier
+distro Linux.
+
+NOTA IMPORTANTE PARA EL DESARROLLO: decidir este layout ANTES de
+implementar amicachy-dos. Cambiar las rutas base despues de tener
+la AssignTable y el resto del sistema construido sobre /opt/amicachy
+seria un refactor doloroso y propenso a errores en todos los sitios
+que asuman esa ruta.
+
+
+------------------------------------------------------------------
+5. EMPAQUETADO MULTI-DISTRO
+------------------------------------------------------------------
+
+Para "instalable como GNOME/KDE en cualquier Linux", se necesita
+empaquetar para los gestores de paquetes habituales, no solo
+pacman/Arch:
+
+    amicachy-hle/
+    +-- packaging/
+        +-- arch/PKGBUILD           <- patron ya usado en AmiCachy
+        +-- debian/                  <- .deb (Ubuntu, Debian, derivados)
+        +-- fedora/amicachy-hle.spec <- .rpm
+        +-- flatpak/                  <- opcional, ver nota abajo
+
+NOTA SOBRE FLATPAK:
+    Para un ENTORNO DE ESCRITORIO (el compositor en si) Flatpak no
+    es lo mas natural - necesita acceso directo a DRM/KMS/seat, que
+    el sandboxing de Flatpak complica.
+    Donde SI tiene sentido a futuro: distribuir las APLICACIONES que
+    corren DENTRO de AmiCachy-HLE (instalables via acp), no el propio
+    compositor/sesion.
+
+
+------------------------------------------------------------------
+6. acp Y EL BACKEND NATIVO MULTI-DISTRO
+------------------------------------------------------------------
+
+El backend de paquetes 68k (Aminet + repo propio de AmiCachy) NO
+cambia nada: vive en ~/.local/share/amicachy/Storage/Programs/,
+es completamente independiente de la distro.
+
+El backend NATIVO (para instalar apps x86/ARM del propio ecosistema
+AmiCachy/DASH) si necesita adaptarse: en el diseno original asumia
+pacman. Para multi-distro se convierte en backend detectable/plugin:
+
+    enum NativeBackend {
+        Pacman,   // Arch/CachyOS
+        Apt,      // Debian/Ubuntu
+        Dnf,      // Fedora
+        None,     // no instala nativo, solo gestiona paquetes 68k
+    }
+
+    acp detecta el gestor de paquetes del sistema host al arrancar
+    y usa el backend correspondiente. Si no reconoce ninguno (o el
+    usuario lo prefiere), opera solo en modo 68k/Aminet, que siempre
+    funciona igual independientemente de la distro.
+
+
+------------------------------------------------------------------
+7. ESTRUCTURA DE REPOS RESULTANTE
+------------------------------------------------------------------
+
+    FreeMEM/AmiCachy        <- ISO (CachyOS + Amiberry + modos de boot)
+                               consume amicachy-hle como dependencia/
+                               paquete, igual que cualquier otra distro
+
+    FreeMEM/dash             <- lenguaje DASH (ya existe, mismo patron)
+
+    FreeMEM/amicachy-hle     <- NUEVO repo independiente:
+                                  - amicachy-compositor (Smithay)
+                                  - amicachy-exec / amicachy-dos /
+                                    amicachy-intuition / amicachy-mui
+                                  - amicachy-shell, amicachy-desktop
+                                  - musashi-sys / musashi-rs
+                                  - acp
+                                  - packaging/ (arch, debian, fedora)
+                                  - .desktop de sesion Wayland
+                                  - docs/ (la documentacion de
+                                    arquitectura ya integrada en
+                                    AmiCachy se moveria/enlazaria aqui)
+
+
+------------------------------------------------------------------
+8. RESUMEN DE PROXIMOS PASOS
+------------------------------------------------------------------
+
+    1. Crear el repo FreeMEM/amicachy-hle (workspace de Cargo)
+    2. Fijar el layout FHS/XDG de la seccion 4 como base de
+       AssignTable ANTES de implementar amicachy-dos
+    3. Anadir el .desktop de sesion Wayland (seccion 3) desde el
+       primer paquete, aunque el compositor aun sea un placeholder
+       (fondo azul + texto, como en el plan original)
+    4. Empezar packaging/ con Arch (reusa el patron de AmiCachy),
+       anadir Debian/Fedora cuando el compositor sea minimamente
+       usable
+    5. AmiCachy (la ISO) pasa a consumir amicachy-hle como paquete
+       externo para su modo de boot HLE, igual que ya hace con
+       amiberry
+
+==================================================================
+FIN DEL DOCUMENTO
+==================================================================

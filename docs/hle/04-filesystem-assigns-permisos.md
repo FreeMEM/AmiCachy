@@ -4,6 +4,14 @@ Cubre: el sistema de directorios estilo Amiga (assigns), el árbol físico bajo
 `/opt/amicachy`, variables ENV/ENVARC, protection bits y el modelo de
 usuarios/permisos.
 
+> **Revisión de layout.** El árbol físico bajo `/opt/amicachy` descrito aquí queda
+> **reemplazado** por el layout **FHS + XDG Base Directory** de
+> [09-escritorio-independiente.md](09-escritorio-independiente.md) §4, al pasar
+> `amicachy-hle` a ser un escritorio multi-distro. La semántica de assigns, ENV/ENVARC,
+> protection bits y el modelo de permisos de este documento **siguen vigentes**; solo
+> cambian las rutas base (`/usr/share/amicachy`, `~/.local/share/amicachy`,
+> `/run/user/$UID/amicachy`).
+
 ## 1. El problema
 
 Los usuarios de Amiga son reacios a `/root`, `/var`, `/usr`, `/lib`, `/bin`, `/home`.

@@ -5,9 +5,11 @@
 
 ## 1. Concepto
 
-AmiCachy-HLE es un **modo de arranque alternativo** a los perfiles actuales basados en
-Amiberry/FS-UAE. En lugar de emular el hardware completo (LLE), se reimplementa el
-**contrato del sistema operativo AmigaOS** (HLE — High-Level Emulation):
+AmiCachy-HLE es un **entorno de escritorio empaquetable** (instalable en cualquier distro
+Linux como GNOME/KDE/Sway) que, dentro de AmiCachy, actúa como un **modo de arranque
+alternativo** a los perfiles basados en Amiberry/FS-UAE. En lugar de emular el hardware
+completo (LLE), se reimplementa el **contrato del sistema operativo AmigaOS** (HLE —
+High-Level Emulation):
 
 ```
 Binario 68k compilado para AmigaOS
@@ -25,6 +27,13 @@ Binario 68k compilado para AmigaOS
 
 **Precedentes conceptuales:** AROS (reimplementación source-compatible de AmigaOS 3.1),
 WINE para Win32, Executor para Mac OS clásico 68k.
+
+> **Cambio de enfoque (ver [09-escritorio-independiente.md](09-escritorio-independiente.md)):**
+> `amicachy-hle` se desarrolla como **repo independiente** (`FreeMEM/amicachy-hle`,
+> mismo patrón que `FreeMEM/dash`) y se distribuye como entorno de escritorio multi-distro.
+> AmiCachy (la ISO) lo consume como paquete externo, igual que ya hace con `amiberry`.
+> Esto revisa el layout `/opt/amicachy` (doc 04 → ahora FHS/XDG) y el arranque por systemd
+> (doc 05 → ahora sesión Wayland vía `.desktop`).
 
 **Target realista:** aplicaciones (productividad, herramientas, software de desarrollo).
 Los juegos que acceden directamente al hardware (copper/blitter) siguen siendo
@@ -60,6 +69,7 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
 | [06-dash-cross-target.md](06-dash-cross-target.md) | DASH como lenguaje cross-target (68k/x86_64/aarch64/wasm), libamicachy-intuition |
 | [07-paquetes-y-repositorios.md](07-paquetes-y-repositorios.md) | Gestor `acp`, formato `.acz`, Aminet, repo overlay pacman, hosting |
 | [08-jit-cpu-68k.md](08-jit-cpu-68k.md) | JIT para la CPU 68k (fase 2): Musashi interpretado vs Cranelift, trampolines jump table, niveles de JIT, roadmap |
+| [09-escritorio-independiente.md](09-escritorio-independiente.md) | Giro a escritorio independiente multi-distro: repo `FreeMEM/amicachy-hle`, sesión Wayland `.desktop`, layout FHS/XDG (reemplaza `/opt/amicachy`), packaging Debian/Fedora, backend nativo de `acp` como plugin |
 
 ## 4. Stack tecnológico (resumen)
 
@@ -82,10 +92,12 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
 | Mes 5–6 | Intuition básico sobre wgpu (ventanas, eventos, sin MUI) | Primera ventana HLE |
 | Mes 7+ | Workbench/escritorio, MUI, Paula (audio) | Escritorio usable |
 
-**Primer PR concreto sugerido:** `pkg/amicachy-hle/` con un `amicachy-desktop` mínimo
-que arranca con Cage, abre una ventana wgpu azul Workbench y muestra el texto
+**Primer PR concreto sugerido:** crear el repo `FreeMEM/amicachy-hle` (workspace de Cargo)
+con un `amicachy-desktop` mínimo que arranca como sesión Wayland (`.desktop` en
+`/usr/share/wayland-sessions/`), abre una ventana wgpu azul Workbench y muestra el texto
 "AmiCachy HLE — WIP" con fuente Topaz. Sin Musashi todavía: solo validar el pipeline de
-build/PKGBUILD/boot entry/Cage.
+build/packaging (Arch primero) y el arranque como sesión. Ver
+[09-escritorio-independiente.md](09-escritorio-independiente.md) §8.
 
 ## 6. Pendiente de decidir/explorar
 
@@ -96,8 +108,9 @@ build/PKGBUILD/boot entry/Cage.
 - Contenido de `lib/amiga/` y el ejemplo "blixel" en el repo de DASH (para planificar el
   refactor `builtins/base.py` + `target_*.py`).
 - Implementación en detalle de los callbacks de memoria de Musashi.
-- PKGBUILD y entrada de boot (`amicachy-hle.conf` / `amicachy-hle.target`) para el nuevo
-  modo, siguiendo el patrón de `pkg/amiberry/`.
+- `packaging/` del repo `amicachy-hle` (Arch primero, luego Debian/Fedora) y cómo AmiCachy
+  consume el paquete externo para su modo de boot HLE, siguiendo el patrón de
+  `pkg/amiberry/`. Ver [09-escritorio-independiente.md](09-escritorio-independiente.md).
 
 ## 7. Referencias
 
