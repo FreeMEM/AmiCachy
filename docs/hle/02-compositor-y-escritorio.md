@@ -110,7 +110,9 @@ gestiona **dos tipos de ventana**:
 2. Integración de apps Linux nativas (Wayland nativo; XWayland opcional).
 3. Ventanas HLE: primer binario 68k corriendo en el shell.
 4. Sistema de Preferencias declarativo.
-5. MUI (cuando Intuition esté sólido).
+5. GadTools y ReAction sobre Intuition/BOOPSI (es lo que emite DASH; ver
+   [01-ejecucion-y-kernel.md](01-ejecucion-y-kernel.md) §1).
+6. MUI (`amicachy-mui`), al final — compatibilidad con software clásico externo.
 
 ## 3. Sistema de configuración (no estilo GNOME/dconf)
 

@@ -52,8 +52,9 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
   - `amicachy-compositor`
   - `amicachy-exec` (exec.library)
   - `amicachy-dos` (dos.library)
-  - `amicachy-intuition` (intuition + graphics.library)
-  - `amicachy-mui` (MUI)
+  - `amicachy-intuition` (intuition + graphics.library + BOOPSI; incluye
+    `gadtools.library` y las clases ReAction — los toolkits que emite DASH)
+  - `amicachy-mui` (MUI; toolkit aparte para software clásico externo)
   - `amicachy-shell`
   - `amicachy-desktop` (proceso principal)
 
@@ -61,7 +62,7 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
 
 | Documento | Contenido |
 |---|---|
-| [01-ejecucion-y-kernel.md](01-ejecucion-y-kernel.md) | Capas de implementación, Musashi/FFI, multinúcleo, scheduler, tasks/señales/mensajes, modelo de memoria, protección de memoria |
+| [01-ejecucion-y-kernel.md](01-ejecucion-y-kernel.md) | Capas de implementación, Musashi/FFI, toolkits de widgets (GadTools/ReAction/MUI y BOOPSI), multinúcleo, scheduler, tasks/señales/mensajes, modelo de memoria, protección de memoria |
 | [02-compositor-y-escritorio.md](02-compositor-y-escritorio.md) | Cage vs Smithay, amicachy-compositor, Workbench propio, sistema de Preferencias |
 | [03-perifericos-y-devices.md](03-perifericos-y-devices.md) | Audio/Paula, impresoras/CUPS, bsdsocket/TCP-IP, clipboard, mapa completo de devices |
 | [04-filesystem-assigns-permisos.md](04-filesystem-assigns-permisos.md) | Assigns, árbol físico en `/opt/amicachy`, ENV/ENVARC, protection bits, modelo de usuarios |
@@ -89,8 +90,8 @@ Amiberry/FS-UAE emulan *todo* el hardware (Agnus, Denise, Paula…); AmiCachy-HL
 |---|---|---|
 | Mes 1–2 | `musashi-sys` + binario 68k de test + exec mínimo (AllocMem, tareas, señales) | Binario 68k ejecuta y llama a exec.library |
 | Mes 3–4 | dos.library suficiente para CLI | Arranca una shell de AmigaOS |
-| Mes 5–6 | Intuition básico sobre wgpu (ventanas, eventos, sin MUI) | Primera ventana HLE |
-| Mes 7+ | Workbench/escritorio, MUI, Paula (audio) | Escritorio usable |
+| Mes 5–6 | Intuition básico sobre wgpu (ventanas, eventos, BOOPSI) + GadTools | Primera ventana HLE con gadgets nativos |
+| Mes 7+ | Workbench/escritorio, ReAction (toolkit principal de DASH), Paula (audio); MUI más adelante | Escritorio usable; apps DASH (GadTools/ReAction) corriendo |
 
 **Primer PR concreto sugerido:** crear el repo `FreeMEM/amicachy-hle` (workspace de Cargo)
 con un `amicachy-desktop` mínimo que arranca como sesión Wayland (`.desktop` en
