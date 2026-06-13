@@ -91,11 +91,16 @@ docker run --rm \
         pacman -Syu --noconfirm --needed arch-install-scripts squashfs-tools
 
         # --- Local repo with the AmiCachy-built packages ------------------
+        # Newest amiberry (this arch) + newest amicachy-base only: repo-add
+        # would otherwise re-process older duplicates. CachyOS ships a Rust
+        # repo-add that panics unless run FROM the repo dir, so cd in first
+        # and use relative names.
         REPO=/tmp/amicachy-repo
         mkdir -p "$REPO"
-        cp /work/out/amiberry-*-"${CPU_ARCH}"-x86_64.pkg.tar.zst "$REPO"/
-        cp /work/out/amicachy-base-*-any.pkg.tar.zst "$REPO"/
-        repo-add "$REPO/amicachy-local.db.tar.gz" "$REPO"/*.pkg.tar.zst
+        latest_amiberry=$(ls -t /work/out/amiberry-*-"${CPU_ARCH}"-x86_64.pkg.tar.zst | head -1)
+        latest_base=$(ls -t /work/out/amicachy-base-*-any.pkg.tar.zst | head -1)
+        cp "$latest_amiberry" "$latest_base" "$REPO"/
+        ( cd "$REPO" && repo-add amicachy-local.db.tar.gz ./*.pkg.tar.zst )
 
         # --- pacman.conf = per-arch profile conf + local repo -------------
         CONF=/tmp/pacman-target.conf
@@ -111,7 +116,13 @@ EOF
         # Single source of truth: archiso/packages.x86_64, minus the
         # live-only packages, plus the target-only ones.
         EXCLUDE="mkinitcpio-archiso syslinux cachyos-calamares calamares-config-amicachy"
-        ADD="amicachy-base amiberry linux-cachyos-headers"
+        # amicachy-base is installed separately, AFTER pacstrap, with
+        # --overwrite: it intentionally ships /etc files also owned by
+        # bash (/etc/skel/.bash_profile), mkinitcpio (/etc/mkinitcpio.conf)
+        # and plymouth (/etc/plymouth/plymouthd.conf) — the same files the
+        # old configure_system() used to write by hand. pacstrap would abort
+        # on the file conflict, so we let amicachy-base win explicitly.
+        ADD="amiberry linux-cachyos-headers"
 
         mapfile -t BASE < <(grep -vE "^\s*#|^\s*$" /work/archiso/packages.x86_64)
         TARGET_PKGS=()
@@ -126,6 +137,28 @@ EOF
         ROOT=/tmp/target
         mkdir -p "$ROOT"
         pacstrap -K -c -C "$CONF" "$ROOT" "${TARGET_PKGS[@]}"
+
+        echo ":: Installing amicachy-base (--overwrite for /etc files it replaces)..."
+        # --overwrite "*": pacman matches the glob against package-relative
+        # paths (e.g. "etc/mkinitcpio.conf", no leading slash), so "/etc/*"
+        # never matches; "*" reliably does. amicachy-base is our controlled
+        # package, so a broad glob is safe. Double quotes (not single) because
+        # this runs inside docker `bash -c '...'` — single quotes would close
+        # the outer string and let the container shell glob-expand it.
+        pacman --root "$ROOT" --config "$CONF" -U --noconfirm \
+            --overwrite "*" \
+            "$REPO"/amicachy-base-*.pkg.tar.zst
+
+        # amicachy-base marks /etc/mkinitcpio.conf and /etc/plymouth/plymouthd.conf
+        # (and the mirrorlists) as backup=, so installing OVER the mkinitcpio and
+        # plymouth copies leaves OUR config as .pacnew and keeps theirs. On the
+        # target we want the AmiCachy config to win (the plymouth hook in
+        # mkinitcpio.conf, Theme=amicachy), so apply every .pacnew under /etc.
+        # Safe here: a fresh pacstrap produces no .pacnew of its own.
+        find "$ROOT/etc" -name "*.pacnew" | while read -r f; do
+            echo "   applying $(basename "$f")"
+            mv -f "$f" "${f%.pacnew}"
+        done
 
         # The local repo only exists at build time; do not leave it in the
         # installed pacman.conf. amicachy-base already ships the real
