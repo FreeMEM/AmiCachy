@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: CC0-1.0
  *
- * Minimal AmiCachy stylesheet (F3). Real theming is F5.
+ * AmiCachy stylesheet (F3, minimal). Real theming is F5.
+ *
+ * Intentionally does NOT restyle the main content area: an earlier dark
+ * #mainApp background made Calamares' default dark text (e.g. the locale
+ * summary on the Location page) unreadable. The AmiCachy identity comes from
+ * the sidebar (styled via branding.desc: SidebarBackground/Text/...), so the
+ * content area keeps Calamares' readable light default until F5.
  */
-
-#mainApp {
-    background-color: #1A1A2E;
-}
