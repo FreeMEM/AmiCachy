@@ -146,6 +146,14 @@ parted
 gptfdisk
 arch-install-scripts
 
+# Calamares installer (LIVE ONLY — Calamares migration, F3). cachyos-calamares
+# is the engine + standard modules; calamares-config-amicachy (local repo)
+# ships our settings.conf, branding and the amicachy-postinstall job. Neither
+# is installed into the target: the installed system is deployed from the
+# separate clean squashfs built by tools/build_target_rootfs.sh.
+cachyos-calamares
+calamares-config-amicachy
+
 # Persistent partition filesystem support (Windows-friendly options)
 ntfs-3g
 exfatprogs

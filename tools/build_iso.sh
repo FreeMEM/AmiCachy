@@ -135,6 +135,31 @@ unbundle_installer_data() {
     rm -f  "${AIROOTFS}/usr/share/amicachy/installer/pacman.conf"
 }
 
+bundle_target_sfs() {
+    # Calamares migration (F3): embed the precompiled TARGET rootfs squashfs
+    # (built by tools/build_target_rootfs.sh) into the live airootfs so the
+    # Calamares unpackfs module can deploy it from /usr/share/amicachy/target.sfs.
+    # Like bundle_installer_data, the .sfs lives only in out/ (gitignored) and
+    # is copied in at build time, then removed from the profile tree afterwards.
+    local sfs="${OUT_DIR}/amicachy-target.sfs"
+    local dest="${PROFILE_DIR}/airootfs/usr/share/amicachy/target.sfs"
+
+    if [[ ! -f "$sfs" ]]; then
+        echo ":: WARNING: out/amicachy-target.sfs not found."
+        echo "   Calamares install (unpackfs) will FAIL without it."
+        echo "   Build it first: ./tools/build_target_rootfs.sh --cpu-arch ${CPU_ARCH}"
+        return
+    fi
+    echo ":: Bundling target rootfs squashfs into airootfs..."
+    mkdir -p "$(dirname "$dest")"
+    cp -a "$sfs" "$dest"
+    echo "   -> $(du -h "$sfs" | cut -f1) target.sfs -> airootfs (usr/share/amicachy/)"
+}
+
+unbundle_target_sfs() {
+    rm -f "${PROFILE_DIR}/airootfs/usr/share/amicachy/target.sfs"
+}
+
 bundle_seed_assets() {
     # Stage Amiga ROMs and HDFs from a host directory into the airootfs so the
     # built ISO ships with them preloaded. Maps:
@@ -254,6 +279,24 @@ setup_local_packages() {
     latest_pkg=$(ls -t "${pkgs[@]}" | head -1)
     cp "$latest_pkg" "$LOCAL_REPO/"
     echo "   -> $(basename "$latest_pkg")"
+
+    # calamares-config-amicachy (Calamares migration, F3): listed statically
+    # in packages.x86_64, so it MUST be in the local repo for mkarchiso to
+    # resolve it. arch=any, so no per-arch tagging.
+    local cala_pkgs=()
+    for f in "${OUT_DIR}"/calamares-config-amicachy-*-any.pkg.tar.zst; do
+        [[ -f "$f" ]] && cala_pkgs+=("$f")
+    done
+    if [[ ${#cala_pkgs[@]} -gt 0 ]]; then
+        local latest_cala
+        latest_cala=$(ls -t "${cala_pkgs[@]}" | head -1)
+        cp "$latest_cala" "$LOCAL_REPO/"
+        echo "   -> $(basename "$latest_cala")"
+    else
+        echo ":: WARNING: no calamares-config-amicachy-*.pkg.tar.zst in out/."
+        echo "   The ISO lists it in packages.x86_64 and mkarchiso will FAIL."
+        echo "   Build it first: ./tools/build_calamares_config.sh"
+    fi
 
     # Create repo database
     repo-add "${LOCAL_REPO}/amicachy-local.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst
@@ -394,6 +437,7 @@ export SOURCE_DATE_EPOCH="$(date +%s)"
 select_pacman_conf
 setup_local_packages
 bundle_installer_data
+bundle_target_sfs
 bundle_seed_assets
-trap 'unbundle_installer_data; cleanup_local_packages; unbundle_seed_assets; cleanup_pacman_conf' EXIT
+trap 'unbundle_installer_data; unbundle_target_sfs; cleanup_local_packages; unbundle_seed_assets; cleanup_pacman_conf' EXIT
 build_iso

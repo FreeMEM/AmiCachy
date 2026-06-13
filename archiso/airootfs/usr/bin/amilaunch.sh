@@ -361,7 +361,13 @@ run_installer() {
     : > "$log"
     chmod 666 "$log" 2>/dev/null || true
 
-    cage -- /usr/bin/amicachy-installer >> "$log" 2>&1
+    # Calamares migration (F3): the live now launches Calamares instead of the
+    # PySide6 wizard (tools/installer). Calamares needs root; the amiga user is
+    # wheel and /etc/sudoers.d/amiga grants NOPASSWD, so sudo -E (preserving the
+    # Wayland session env) elevates without a prompt. This runs only under
+    # amiprofile=installer, which is never generated on an installed target, so
+    # the same script shipped in amicachy-base is inert there.
+    cage -- sudo -E calamares >> "$log" 2>&1
     local rc=$?
 
     printf '\033[H\033[2J\033[3J' > /dev/tty1 2>/dev/null || true
