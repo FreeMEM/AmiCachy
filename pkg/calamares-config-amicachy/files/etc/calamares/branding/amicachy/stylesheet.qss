@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: CC0-1.0
+ *
+ * Minimal AmiCachy stylesheet (F3). Real theming is F5.
+ */
+
+#mainApp {
+    background-color: #1A1A2E;
+}

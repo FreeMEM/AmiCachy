@@ -137,6 +137,11 @@ por `--cpu-arch`, igual que hoy hace `build_iso.sh`. El paquete solo trae los mi
 
 ## Próxima acción concreta — F3 (esqueleto Calamares, happy path T1)
 
+> **Plan detallado y aprobado en `tasks/calamares-f3-plan.md`** (2026-06-13).
+> Decisiones de alcance confirmadas: (1) boot entries vía **módulo Python**
+> `amicachy-postinstall`; (2) **squashfs target separado y limpio**; (3) **reemplazar
+> ya** el instalador PySide6 en el live.
+
 F3.0 desbloqueó F3. Siguiente: crear `pkg/calamares-config-amicachy/` con
 `settings.conf` + módulos estándar (`partition`, `mount`, `unpackfs`, `fstab`,
 `locale`, `keyboard`, `users`, `services-systemd`, `initramfs`, `bootloader`,

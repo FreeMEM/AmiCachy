@@ -1,0 +1,39 @@
+# Maintainer: AmiCachy Project <devel@freemem.space>
+#
+# calamares-config-amicachy — Calamares branding + module config for the
+# AmiCachy installer (Calamares migration, F3).
+#
+# Ships, under a self-contained files/ tree (assembled by package() with a
+# plain cp -a, same pattern as pkg/amicachy-base but without collecting from
+# archiso — these are Calamares-only assets that have no source of truth in
+# the live ISO):
+#   - /etc/calamares/settings.conf         AmiCachy install sequence
+#   - /etc/calamares/modules/*.conf        config for the standard modules
+#   - /etc/calamares/branding/amicachy/    minimal F3 branding (polish = F5)
+#   - /usr/lib/calamares/modules/amicachy-postinstall/  custom Python job
+#                                          that writes the systemd-boot
+#                                          entries with amiprofile= (F3: the
+#                                          'profiles' sub-job only; roms/
+#                                          addons/mac_fallback land in F6)
+#
+# Depends on cachyos-calamares (the engine + the standard modules this config
+# drives). Built with tools/build_calamares_config.sh (arch=any, no compile).
+
+pkgname=calamares-config-amicachy
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Calamares branding and module configuration for the AmiCachy installer"
+arch=('any')
+url="https://github.com/FreeMEM/AmiCachy"
+license=('GPL-3.0-or-later')
+depends=('cachyos-calamares')
+backup=(
+    'etc/calamares/settings.conf'
+)
+
+package() {
+    cp -a "${startdir}/files/." "${pkgdir}/"
+
+    # The Python job must be executable so Calamares' python loader runs it.
+    chmod 0755 "${pkgdir}/usr/lib/calamares/modules/amicachy-postinstall/main.py"
+}

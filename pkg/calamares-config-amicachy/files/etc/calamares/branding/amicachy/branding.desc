@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CC0-1.0
+#
+# Minimal AmiCachy branding for F3. The polished Workbench/Boing-Ball look
+# and the real slideshow (port of tools/installer/slideshow.py) are F5; here
+# we ship just enough for Calamares to run with the AmiCachy identity.
+---
+componentName:  amicachy
+
+welcomeStyleCalamares:   false
+welcomeExpandingLogo:    true
+windowExpanding:         normal
+windowSize:              1000px,560px
+windowPlacement:         center
+
+sidebar:     widget
+navigation:  widget
+
+strings:
+    productName:         AmiCachy
+    shortProductName:    AmiCachy
+    version:             2026
+    shortVersion:        2026
+    versionedName:       AmiCachy 2026
+    shortVersionedName:  AmiCachy
+    bootloaderEntryName: AmiCachy
+    productUrl:          "https://github.com/FreeMEM/AmiCachy"
+    supportUrl:          "https://github.com/FreeMEM/AmiCachy/issues"
+
+images:
+    productLogo:     "logo.png"
+    productIcon:     "icon.png"
+    productWelcome:  "welcome.png"
+
+slideshow:      "show.qml"
+slideshowAPI:   2
+
+style:
+    SidebarBackground:        "#0A0A2A"
+    SidebarText:              "#FFFFFF"
+    SidebarTextSelect:        "#FF8800"
+    SidebarTextCurrent:       "#0A0A2A"
+    SidebarBackgroundCurrent: "#FF8800"
