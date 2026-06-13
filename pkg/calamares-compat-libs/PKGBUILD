@@ -1,0 +1,62 @@
+# Maintainer: AmiCachy Project <devel@freemem.space>
+#
+# calamares-compat-libs — TEMPORARY compatibility shim for the LIVE installer.
+#
+# WHY THIS EXISTS
+# --------------
+# The cachyos-calamares package in the CachyOS repo (3.4.1-8 as of 2026-06)
+# is STALE: it was built against yaml-cpp 0.8 and the boost 1.89 suite, but
+# the repo has since moved to yaml-cpp 0.9 and boost 1.91 WITHOUT rebuilding
+# calamares. So the calamares binary fails at startup with:
+#   error while loading shared libraries: libyaml-cpp.so.0.8 / libboost_*.so.1.89.0
+# The package-level deps are satisfied (yaml-cpp/boost ARE installed) but the
+# sonames do not match. This is an upstream rolling-release breakage, not ours.
+#
+# This package ships the OLD soname'd shared libraries (yaml-cpp 0.8 + the full
+# boost 1.89 set) extracted verbatim from the Arch Linux Archive, so the stale
+# calamares binary finds them. They COEXIST with yaml-cpp 0.9 / boost 1.91
+# (different filenames), so nothing else on the system is affected.
+#
+# LIVE ONLY: calamares does not run on the installed target, so the target
+# rootfs (tools/build_target_rootfs.sh) excludes this package.
+#
+# REMOVE THIS when cachyos-calamares is rebuilt against current boost/yaml-cpp
+# upstream: drop the package, the packages.x86_64 entry, the build_iso local-repo
+# hook and the build_target_rootfs EXCLUDE entry.
+
+pkgname=calamares-compat-libs
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Compat soname libs (yaml-cpp 0.8 + boost 1.89) for the stale cachyos-calamares — live installer only, temporary"
+arch=('x86_64')
+url="https://github.com/FreeMEM/AmiCachy"
+license=('BSL-1.0' 'MIT')  # boost (BSL-1.0), yaml-cpp (MIT)
+options=('!strip' '!debug')  # prebuilt vendored libs; do not touch them
+
+# Pulled verbatim from the Arch Linux Archive (the last builds carrying these
+# sonames). These are pacman packages, not source tarballs, so noextract them
+# and unpack the needed .so by hand in package().
+_yamlcpp=yaml-cpp-0.8.0-2-x86_64.pkg.tar.zst
+_boost=boost-libs-1.89.0-4-x86_64.pkg.tar.zst
+source=(
+    "${_yamlcpp}::https://archive.archlinux.org/packages/y/yaml-cpp/${_yamlcpp}"
+    "${_boost}::https://archive.archlinux.org/packages/b/boost-libs/${_boost}"
+)
+noextract=("${_yamlcpp}" "${_boost}")
+sha256sums=(
+    '560c6b0ff90432c989915219bd45d3d0c6116a60a194a7ab0fb833c6843e11d2'
+    'a7067af89ef140940e5df9c9e81a49fdfa4f8f7e7d4c5cc2a4ab64d9d63fd043'
+)
+
+package() {
+    install -dm755 "${pkgdir}/usr/lib"
+
+    # yaml-cpp 0.8 runtime lib + its soname symlink
+    bsdtar -C "${srcdir}" -xf "${srcdir}/${_yamlcpp}" usr/lib/libyaml-cpp.so.0.8.0
+    install -m755 "${srcdir}/usr/lib/libyaml-cpp.so.0.8.0" "${pkgdir}/usr/lib/"
+    ln -s libyaml-cpp.so.0.8.0 "${pkgdir}/usr/lib/libyaml-cpp.so.0.8"
+
+    # Full boost 1.89 versioned shared-lib set (calamares links many of them).
+    bsdtar -C "${srcdir}" -xf "${srcdir}/${_boost}"
+    cp -a "${srcdir}/usr/lib/"libboost_*.so.1.89.0 "${pkgdir}/usr/lib/"
+}

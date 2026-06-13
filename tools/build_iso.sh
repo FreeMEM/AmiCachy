@@ -280,23 +280,28 @@ setup_local_packages() {
     cp "$latest_pkg" "$LOCAL_REPO/"
     echo "   -> $(basename "$latest_pkg")"
 
-    # calamares-config-amicachy (Calamares migration, F3): listed statically
-    # in packages.x86_64, so it MUST be in the local repo for mkarchiso to
-    # resolve it. arch=any, so no per-arch tagging.
-    local cala_pkgs=()
-    for f in "${OUT_DIR}"/calamares-config-amicachy-*-any.pkg.tar.zst; do
-        [[ -f "$f" ]] && cala_pkgs+=("$f")
+    # Extra AmiCachy packages (Calamares migration, F3) that packages.x86_64
+    # lists statically, so they MUST be in the local repo for mkarchiso to
+    # resolve them. calamares-compat-libs is a temporary shim for the stale
+    # cachyos-calamares (see pkg/calamares-compat-libs/PKGBUILD).
+    local extra_globs=(
+        "calamares-config-amicachy-*-any.pkg.tar.zst"
+        "calamares-compat-libs-*-x86_64.pkg.tar.zst"
+    )
+    local g matches latest_extra
+    for g in "${extra_globs[@]}"; do
+        matches=()
+        for f in "${OUT_DIR}"/$g; do [[ -f "$f" ]] && matches+=("$f"); done
+        if [[ ${#matches[@]} -gt 0 ]]; then
+            latest_extra=$(ls -t "${matches[@]}" | head -1)
+            cp "$latest_extra" "$LOCAL_REPO/"
+            echo "   -> $(basename "$latest_extra")"
+        else
+            echo ":: WARNING: no package matching '$g' in out/."
+            echo "   It is listed in packages.x86_64 and mkarchiso will FAIL."
+            echo "   Build the F3 packages: build_calamares_config.sh / build_calamares_compat.sh"
+        fi
     done
-    if [[ ${#cala_pkgs[@]} -gt 0 ]]; then
-        local latest_cala
-        latest_cala=$(ls -t "${cala_pkgs[@]}" | head -1)
-        cp "$latest_cala" "$LOCAL_REPO/"
-        echo "   -> $(basename "$latest_cala")"
-    else
-        echo ":: WARNING: no calamares-config-amicachy-*.pkg.tar.zst in out/."
-        echo "   The ISO lists it in packages.x86_64 and mkarchiso will FAIL."
-        echo "   Build it first: ./tools/build_calamares_config.sh"
-    fi
 
     # Create repo database
     repo-add "${LOCAL_REPO}/amicachy-local.db.tar.gz" "${LOCAL_REPO}"/*.pkg.tar.zst

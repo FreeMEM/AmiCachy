@@ -115,7 +115,7 @@ EOF
         # --- Derive the target package list from packages.x86_64 ----------
         # Single source of truth: archiso/packages.x86_64, minus the
         # live-only packages, plus the target-only ones.
-        EXCLUDE="mkinitcpio-archiso syslinux cachyos-calamares calamares-config-amicachy"
+        EXCLUDE="mkinitcpio-archiso syslinux cachyos-calamares calamares-config-amicachy calamares-compat-libs"
         # amicachy-base is installed separately, AFTER pacstrap, with
         # --overwrite: it intentionally ships /etc files also owned by
         # bash (/etc/skel/.bash_profile), mkinitcpio (/etc/mkinitcpio.conf)

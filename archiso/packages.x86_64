@@ -153,6 +153,10 @@ arch-install-scripts
 # separate clean squashfs built by tools/build_target_rootfs.sh.
 cachyos-calamares
 calamares-config-amicachy
+# calamares-compat-libs: temporary shim — cachyos-calamares 3.4.1-8 is stale
+# (built vs yaml-cpp 0.8 / boost 1.89, repo has 0.9 / 1.91). Ships the old
+# soname libs so calamares starts. Remove when upstream rebuilds calamares.
+calamares-compat-libs
 
 # Persistent partition filesystem support (Windows-friendly options)
 ntfs-3g
