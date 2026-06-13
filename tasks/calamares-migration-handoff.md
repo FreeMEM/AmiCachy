@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-Vamos a sustituir el instalador PySide6 actual (`tools/installer/`) por **Calamares con branding Amiga**, en una migración progresiva (no big-bang). Hay un plan de 10 fases ya validado por el usuario. F1 y F2.a están hechas; el smoke test E2E de F2.a quedó interrumpido por el lío de paths del prompt de permiso. **Siguiente acción concreta**: ejecutar el smoke test.
+Vamos a sustituir el instalador PySide6 actual (`tools/installer/`) por **Calamares con branding Amiga**, en una migración progresiva (no big-bang). Hay un plan de 10 fases ya validado por el usuario. **Hechas: F1, F2.a, F2.b, F2.c y F3.0** (paquete `amicachy-base`, 2026-06-13). **Siguiente acción concreta**: F3 — esqueleto Calamares (`pkg/calamares-config-amicachy/` + autostart del live a `calamares`). Ver "Próxima acción concreta" abajo.
 
 ---
 
@@ -49,8 +49,8 @@ El instalador PySide6 actual (`tools/installer/backend.py` línea 281) hace `wip
 | F2.a | Scaffolding VM dualboot | ✅ COMPLETADO (2026-05-23) | Entregable: `dev/dualboot-vm/`. Smoke test E2E con ISO live: pasa |
 | F2.b | Baseline Debian (ext4 + GRUB-EFI) | ✅ COMPLETADO (2026-05-24) | Entregable: `baselines/debian12-ext4-grub.qcow2` (~1.8 GB, Debian 13.5.0 — el slot mantiene el nombre "debian12" por historia). Build automatizado en ~3 min con `scripts/build-baseline-debian.sh` (~700 MB ISO cacheada). Smoke test standalone: boot E2E hasta login prompt OK |
 | F2.c | Baseline Windows 11 (NTFS + ESP) | ✅ COMPLETADO (2026-05-24) | Entregable: `baselines/win11-ntfs.qcow2` (~13 GB, Win11 25H2 Spanish, cuenta tester/tester). Build **semi-manual**: `scripts/build-baseline-windows.sh` automatiza descarga/virtio/remaster ISO no-prompt + fases specialize/oobeSystem, pero 25H2 (SetupPrep.exe nuevo) ignora autounattend en la fase windowsPE → ~5 clicks manuales en clave/edición/partición. Ver [[project_win11_baseline_autounattend]] |
-| F3.0 | Paquete `amicachy-base` | ⏳ pendiente | **Bloquea F3**. Empaquetar todo lo que hoy escribe `configure_system()` |
-| F3 | Esqueleto Calamares (happy path T1) | 🔒 bloqueada por F1, F2.a, F3.0 | Paquete `pkg/calamares-config-amicachy/` + módulos estándar + cambio de autostart live |
+| F3.0 | Paquete `amicachy-base` | ✅ COMPLETADO (2026-06-13) | Entregable: `pkg/amicachy-base/` (PKGBUILD + `overlay/`) + `tools/build_amicachy_base.sh`. Produce `out/amicachy-base-1.0.0-1-any.pkg.tar.zst`. **Desbloquea F3** |
+| F3 | Esqueleto Calamares (happy path T1) | 🔓 desbloqueada (F1, F2.a, F3.0 ✅) | Paquete `pkg/calamares-config-amicachy/` + módulos estándar + cambio de autostart live |
 | F4 | Dual-boot real (T2, T3) | 🔒 bloqueada solo por F3 (F2.b/F2.c ✅) | Módulos custom `amicachy-foreign-os`, `amicachy-preflight`, `amicachy-postinstall.profiles`. Baselines Debian+Win11 ya disponibles para overlays |
 | F5 | Branding Workbench/Amiga | ⏳ pendiente, paralelizable | QML branding + slideshow (port de `slideshow.py`) |
 | F6 | Módulos AmiCachy custom | 🔒 bloqueada por F3 | `amicachy-hardware`, `amicachy-profiles`, `amicachy-addons` (QML) + `amicachy-postinstall` (Python) |
@@ -100,39 +100,59 @@ dev/dualboot-vm/
 
 ---
 
-## Próxima acción concreta
+## Entregable F3.0 — paquete `amicachy-base` (2026-06-13)
 
-**Ejecutar smoke test E2E de F2.a** con un disco vacío y la ISO/IMG más reciente. Comando exacto:
-
-```bash
-/home/freemem/Projects/AmiCachy/dev/dualboot-vm/scripts/run-test.sh \
-    --baseline empty-50g \
-    --iso /home/freemem/Projects/AmiCachy/out/amicachy-pendrive-2026.05.18.img \
-    --display none --discard -- -daemonize
+```
+pkg/amicachy-base/
+├── PKGBUILD                    # arch=any; recoge assets compartidos de archiso/airootfs
+└── overlay/                    # SOLO los ficheros exclusivos del target (no existen en el live):
+    └── etc/
+        ├── mkinitcpio.conf                     (HOOKS con plymouth)
+        ├── plymouth/plymouthd.conf             (Theme=amicachy)
+        ├── security/limits.d/90-amiga-rtprio.conf
+        └── systemd/system/
+            ├── getty@tty1.service.d/autologin.conf   (autologin amiga TTY1)
+            └── amicachy-performance.service
+tools/build_amicachy_base.sh    # wrapper makepkg local (sin Docker) → out/
 ```
 
-Después de lanzarlo:
-1. Esperar ~20 s para que arranque OVMF + isohybrid
-2. Verificar proceso QEMU vivo (`pgrep -a qemu-system-x86_64`)
-3. Inspeccionar `logs/<run-id>.serial.log` para confirmar boot sin pánico
-4. Matar QEMU (`pkill qemu-system-x86_64` o vía monitor socket)
+**Decisión de arquitectura (fuente de verdad):** los assets compartidos con el live
+(scripts `amicachy-*`, `amilaunch.sh`, labwc, `pam.d/cage`, `*.uae`, theme plymouth,
+mirrorlists) **NO se duplican** en el paquete: siguen viviendo en `archiso/airootfs/` y
+el `package()` los recoge en build-time vía `$startdir`. Esto acopla makepkg al layout
+del repo (debe correr desde `pkg/amicachy-base/`), aceptable por ser paquete interno.
+La unificación inversa (que el live live consuma el paquete en vez de los sueltos) es
+trabajo de F8.
 
-Nota: el `.img` es ISO 9660 + MBR híbrido ("isohybrid"), por eso funciona como `-drive media=cdrom` sin ajustar el script.
+**Verificado:** paquete construye y empaqueta limpio; `plymouth-quit-wait` ausente
+(0 ocurrencias, respeta [[feedback_plymouth_mask]]); `amicachy-installer`/`copy-roms`
+excluidos; los 3 symlinks `.wants` correctos; scripts a 0755; skel con los 5 AMIGA_DIRS.
 
-Si el smoke test pasa: marcar F2.a definitivamente cerrada y elegir siguiente paso.
+**NO incluido (Calamares estándar lo cubre):** timezone, locale, hostname, vconsole,
+useradd, chown, NetworkManager enable, `mkinitcpio -P`. Y `pacman.conf` queda fuera por
+ser **arch-específico** (`pacman-{generic,v3,v4}.conf`): lo inyecta el build del squashfs
+por `--cpu-arch`, igual que hoy hace `build_iso.sh`. El paquete solo trae los mirrorlists.
 
 ---
 
-## Tareas tras el smoke test (en orden recomendado)
+## Próxima acción concreta — F3 (esqueleto Calamares, happy path T1)
 
-| Cuando hagas... | Bloqueas/desbloqueas... |
+F3.0 desbloqueó F3. Siguiente: crear `pkg/calamares-config-amicachy/` con
+`settings.conf` + módulos estándar (`partition`, `mount`, `unpackfs`, `fstab`,
+`locale`, `keyboard`, `users`, `services-systemd`, `initramfs`, `bootloader`,
+`umount`) y cambiar el autostart del live de `amicachy-installer` a `calamares`.
+El squashfs que despliega `unpackfs` debe incluir el paquete `amicachy-base` ya
+instalado — ése es el punto donde F3.0 se enchufa en la cadena.
+
+Pendiente menor de integración (cuando exista el build del squashfs): que ese build
+añada `out/amicachy-base-*.pkg.tar.zst` a su repo local, análogo a cómo
+`tools/build_iso.sh` ya hace con `amiberry-*`.
+
+### Otras piezas en paralelo
+| Pieza | Estado |
 |---|---|
-| F2.b (baseline Debian, ~1 día) | Junto con F2.c desbloquea F4 |
-| F2.c (baseline Windows, ~1 día) | Junto con F2.b desbloquea F4 |
-| F3.0 (paquete amicachy-base) | Desbloquea F3 |
-| F5 (branding QML) | Paralelizable, no bloquea nada |
-
-Si quieres mostrar avance rápido al usuario, F3.0 + F5 son buenas piezas para hacer en paralelo mientras esperas a que F2.b/F2.c maduren.
+| F5 (branding QML + slideshow) | Paralelizable, no bloquea nada |
+| F4 (dual-boot real) | Bloqueada por F3; baselines Debian+Win11 ya listos |
 
 ---
 

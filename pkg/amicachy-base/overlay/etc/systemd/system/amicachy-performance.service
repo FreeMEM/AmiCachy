@@ -1,0 +1,13 @@
+[Unit]
+Description=AmiCachy: set performance cpufreq governor for emulation profiles
+DefaultDependencies=yes
+After=local-fs.target
+ConditionKernelCommandLine=amiprofile
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amicachy-cpufreq-set
+
+[Install]
+WantedBy=multi-user.target

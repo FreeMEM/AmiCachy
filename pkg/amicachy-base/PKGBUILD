@@ -1,0 +1,149 @@
+# Maintainer: AmiCachy Project <devel@freemem.space>
+#
+# amicachy-base — base rootfs payload for the installed AmiCachy system.
+#
+# This package bundles everything the legacy PySide6 installer used to write
+# by hand in tools/installer/backend.py::configure_system() (~80% of it).
+# Under the Calamares migration (docs/calamares-migration-inventory.md, F3.0)
+# this work moves from "post-install configuration" to "pre-built rootfs
+# payload": Calamares unpacks the squashfs (which already contains this
+# package) and only the custom modules do the AmiCachy-specific dynamic bits.
+#
+# SOURCE OF TRUTH
+# ---------------
+# The shared assets (scripts amicachy-*, amilaunch.sh, labwc config, pam/cage,
+# uae configs, plymouth theme, mirrorlists) are NOT duplicated into this
+# package. They keep living in archiso/airootfs/ (the live ISO's source of
+# truth) and are collected from there at build time via $startdir. Only the
+# files that the live ISO does NOT carry — the ones configure_system()
+# generated dynamically for the *target* (autologin override, RT limits,
+# performance service, mkinitcpio/plymouth config) — live as real files under
+# overlay/ next to this PKGBUILD.
+#
+# This couples makepkg to the repo layout (it must run from pkg/amicachy-base/
+# inside the AmiCachy checkout), which is fine: this is an internal package,
+# never destined for the AUR. Build it with tools/build_amicachy_base.sh.
+#
+# NOT included (Calamares standard modules cover these — see inventory §2.1):
+#   timezone, locale.gen/conf, hostname, vconsole.conf, useradd amiga,
+#   chown, NetworkManager enable, mkinitcpio -P, and pacman.conf (which is
+#   CPU-arch specific: pacman-{generic,v3,v4}.conf, injected by the squashfs
+#   build, exactly as tools/build_iso.sh does today per --cpu-arch).
+
+pkgname=amicachy-base
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="AmiCachy base rootfs payload — scripts, configs and skel for the installed system"
+arch=('any')
+url="https://github.com/FreeMEM/AmiCachy"
+license=('GPL-3.0-or-later')
+# Runtime deps that the bundled units/configs reference directly. The full
+# emulation stack (amiberry, cage, labwc, networkmanager, …) is pulled in by
+# the ISO's packages.x86_64; we only assert what these files need to be valid.
+depends=('plymouth')
+backup=(
+    'etc/mkinitcpio.conf'
+    'etc/plymouth/plymouthd.conf'
+    'etc/security/limits.d/90-amiga-rtprio.conf'
+    'etc/pacman.d/cachyos-mirrorlist'
+    'etc/pacman.d/cachyos-v3-mirrorlist'
+    'etc/pacman.d/cachyos-v4-mirrorlist'
+)
+
+# Scripts from archiso/airootfs/usr/bin/ that survive into the installed
+# system (inventory §5). amicachy-installer and amicachy-copy-roms are
+# deliberately excluded (replaced by Calamares / retired).
+_bin_scripts=(
+    amilaunch.sh
+    start_dev_env.sh
+    amicachy-amiberry-session
+    amicachy-cpufreq-set
+    amicachy-earlystartup
+    amicachy-fetch-asset
+    amicachy-fix-mac-boot
+    amicachy-grow-data
+    amicachy-link-host-assets
+    amicachy-persistent-data
+    amicachy-seed-assets
+    amicachy-set-amiga-password
+    amicachy-wifi-debug
+)
+
+# Amiga home directory skeleton (configure_system AMIGA_DIRS). Placed in
+# /etc/skel so the Calamares users module copies it into the amiga home.
+_skel_dirs=(
+    kickstarts
+    disks
+    hdf
+    os41/system
+    os41/work
+)
+
+package() {
+    # Repo root, two levels up from pkg/amicachy-base/. makepkg sets $startdir
+    # to the directory containing this PKGBUILD.
+    local _repo="$(cd "${startdir}/../.." && pwd)"
+    local _air="${_repo}/archiso/airootfs"
+
+    if [[ ! -d "${_air}" ]]; then
+        echo "ERROR: ${_air} not found — build from pkg/amicachy-base/ inside the AmiCachy checkout." >&2
+        return 1
+    fi
+
+    # --- 1. Target-only overlay (files the live ISO does not carry) ---------
+    cp -a "${startdir}/overlay/." "${pkgdir}/"
+
+    # --- 2. /usr/bin scripts (collected from the live source of truth) ------
+    install -dm755 "${pkgdir}/usr/bin"
+    local s
+    for s in "${_bin_scripts[@]}"; do
+        install -Dm755 "${_air}/usr/bin/${s}" "${pkgdir}/usr/bin/${s}"
+    done
+
+    # --- 3. PAM stack for cage ----------------------------------------------
+    install -Dm644 "${_air}/etc/pam.d/cage" "${pkgdir}/etc/pam.d/cage"
+
+    # --- 4. /etc/skel: dotfiles + labwc + amiga dir skeleton ----------------
+    install -Dm644 "${_air}/etc/skel/.bash_profile" "${pkgdir}/etc/skel/.bash_profile"
+    if [[ -f "${_air}/etc/skel/.hushlogin" ]]; then
+        install -Dm644 "${_air}/etc/skel/.hushlogin" "${pkgdir}/etc/skel/.hushlogin"
+    fi
+    install -dm755 "${pkgdir}/etc/skel/.config/labwc"
+    local f
+    for f in autostart environment rc.xml; do
+        install -Dm644 "${_air}/etc/skel/.config/labwc/${f}" \
+            "${pkgdir}/etc/skel/.config/labwc/${f}"
+    done
+    local d
+    for d in "${_skel_dirs[@]}"; do
+        install -dm755 "${pkgdir}/etc/skel/${d}"
+    done
+
+    # --- 5. UAE configs ------------------------------------------------------
+    install -Dm644 "${_air}/usr/share/amicachy/uae/a1200.uae" \
+        "${pkgdir}/usr/share/amicachy/uae/a1200.uae"
+    install -Dm644 "${_air}/usr/share/amicachy/uae/os41.uae" \
+        "${pkgdir}/usr/share/amicachy/uae/os41.uae"
+
+    # --- 6. CachyOS mirrorlists (static; pacman.conf is arch-specific) ------
+    local ml
+    for ml in cachyos-mirrorlist cachyos-v3-mirrorlist cachyos-v4-mirrorlist; do
+        install -Dm644 "${_air}/etc/pacman.d/${ml}" "${pkgdir}/etc/pacman.d/${ml}"
+    done
+
+    # --- 7. Plymouth theme ---------------------------------------------------
+    install -dm755 "${pkgdir}/usr/share/plymouth/themes/amicachy"
+    cp -a "${_air}/usr/share/plymouth/themes/amicachy/." \
+        "${pkgdir}/usr/share/plymouth/themes/amicachy/"
+
+    # --- 8. systemd .wants symlinks (no plymouth-quit-wait — see inventory & ---
+    #        feedback_plymouth_mask: we must NOT block multi-user.target on it) -
+    install -dm755 "${pkgdir}/etc/systemd/system/multi-user.target.wants"
+    install -dm755 "${pkgdir}/etc/systemd/system/sysinit.target.wants"
+    ln -sf "/etc/systemd/system/amicachy-performance.service" \
+        "${pkgdir}/etc/systemd/system/multi-user.target.wants/amicachy-performance.service"
+    ln -sf "/usr/lib/systemd/system/plymouth-start.service" \
+        "${pkgdir}/etc/systemd/system/sysinit.target.wants/plymouth-start.service"
+    ln -sf "/usr/lib/systemd/system/plymouth-quit.service" \
+        "${pkgdir}/etc/systemd/system/multi-user.target.wants/plymouth-quit.service"
+}
