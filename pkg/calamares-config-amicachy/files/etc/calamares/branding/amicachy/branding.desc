@@ -34,9 +34,11 @@ images:
 slideshow:      "show.qml"
 slideshowAPI:   2
 
+# Workbench 3.2.3 palette: Workbench gray panels, steel-blue active selection,
+# black text, AmigaOS-red accent. Evokes the classic 3.x desktop.
 style:
-    SidebarBackground:        "#0A0A2A"
-    SidebarText:              "#FFFFFF"
-    SidebarTextSelect:        "#FF8800"
-    SidebarTextCurrent:       "#0A0A2A"
-    SidebarBackgroundCurrent: "#FF8800"
+    SidebarBackground:        "#A8A8A8"
+    SidebarText:              "#000000"
+    SidebarTextSelect:        "#FFFFFF"
+    SidebarTextCurrent:       "#FFFFFF"
+    SidebarBackgroundCurrent: "#6C82B4"

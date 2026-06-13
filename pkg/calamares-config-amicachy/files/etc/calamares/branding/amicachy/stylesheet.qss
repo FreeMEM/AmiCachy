@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: CC0-1.0
  *
- * AmiCachy stylesheet (F3, minimal). Real theming is F5.
+ * AmiCachy stylesheet — Workbench 3.2.3 look (F3 minimal, polished in F5).
  *
- * Intentionally does NOT restyle the main content area: an earlier dark
- * #mainApp background made Calamares' default dark text (e.g. the locale
- * summary on the Location page) unreadable. The AmiCachy identity comes from
- * the sidebar (styled via branding.desc: SidebarBackground/Text/...), so the
- * content area keeps Calamares' readable light default until F5.
+ * Light Workbench gray window background (NOT dark: an earlier dark background
+ * made Calamares' default dark text unreadable). #BCBCBC keeps black text
+ * perfectly legible while evoking the classic 3.x desktop gray. Input widgets
+ * keep their light default, like Workbench string gadgets on a gray panel.
  */
+
+#mainApp {
+    background-color: #BCBCBC;
+}

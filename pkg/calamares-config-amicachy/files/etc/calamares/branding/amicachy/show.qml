@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: CC0-1.0
  *
- * Placeholder slideshow for F3. The real Workbench slideshow (port of
- * tools/installer/slideshow.py) is F5.
+ * Workbench 3.2.3-styled slideshow placeholder (F3). Real Workbench slideshow
+ * (port of tools/installer/slideshow.py) is F5.
  */
 import QtQuick 2.0
 import calamares.slideshow 1.0
@@ -19,13 +19,24 @@ Presentation {
     Slide {
         Rectangle {
             anchors.fill: parent
-            color: "#0A0A2A"
-            Text {
+            color: "#A8A8A8"   // Workbench gray panel
+            Column {
                 anchors.centerIn: parent
-                color: "#FF8800"
-                font.pixelSize: 24
-                horizontalAlignment: Text.AlignHCenter
-                text: "AmiCachy\nPreparando tu estación Amiga…"
+                spacing: 8
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: "#CC0000"   // AmigaOS red
+                    font.pixelSize: 30
+                    font.bold: true
+                    text: "AmiCachy"
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    color: "#000000"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "Preparando tu estación Amiga…"
+                }
             }
         }
     }
