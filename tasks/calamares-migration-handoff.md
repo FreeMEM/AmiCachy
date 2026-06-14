@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-Vamos a sustituir el instalador PySide6 actual (`tools/installer/`) por **Calamares con branding Amiga**, en una migración progresiva (no big-bang). Hay un plan de 10 fases ya validado por el usuario. **Hechas: F1, F2.a, F2.b, F2.c y F3.0** (paquete `amicachy-base`, 2026-06-13). **Siguiente acción concreta**: F3 — esqueleto Calamares (`pkg/calamares-config-amicachy/` + autostart del live a `calamares`). Ver "Próxima acción concreta" abajo.
+Vamos a sustituir el instalador PySide6 actual (`tools/installer/`) por **Calamares con branding Amiga**, en una migración progresiva (no big-bang). Hay un plan de 10 fases ya validado por el usuario. **Hechas: F1, F2.a/b/c, F3.0 y F3** (esqueleto Calamares **validado E2E el 2026-06-14**: disco vacío → reboot → systemd-boot → Amiberry+AROS, branding Workbench 3.2.3). **Siguiente acción concreta**: **F4 — dual-boot real**. Plan detallado en `tasks/calamares-f4-plan.md`. Gotchas que reaparecen: `tasks/calamares-f3-gotchas.md`.
 
 ---
 
@@ -51,7 +51,7 @@ El instalador PySide6 actual (`tools/installer/backend.py` línea 281) hace `wip
 | F2.c | Baseline Windows 11 (NTFS + ESP) | ✅ COMPLETADO (2026-05-24) | Entregable: `baselines/win11-ntfs.qcow2` (~13 GB, Win11 25H2 Spanish, cuenta tester/tester). Build **semi-manual**: `scripts/build-baseline-windows.sh` automatiza descarga/virtio/remaster ISO no-prompt + fases specialize/oobeSystem, pero 25H2 (SetupPrep.exe nuevo) ignora autounattend en la fase windowsPE → ~5 clicks manuales en clave/edición/partición. Ver [[project_win11_baseline_autounattend]] |
 | F3.0 | Paquete `amicachy-base` | ✅ COMPLETADO (2026-06-13) | Entregable: `pkg/amicachy-base/` (PKGBUILD + `overlay/`) + `tools/build_amicachy_base.sh`. Produce `out/amicachy-base-1.0.0-1-any.pkg.tar.zst`. **Desbloquea F3** |
 | F3 | Esqueleto Calamares (happy path T1) | ✅ **VALIDADO E2E** (2026-06-14) | Instalación completa en disco vacío → reboot → systemd-boot (`amiprofile=classic_68k`) → Plymouth → autologin amiga → amilaunch → **Amiberry+AROS**. Branding **Workbench 3.2.3**. Despliegue por `unsquashfs` (no unpackfs). 6 gotchas resueltos en el test — ver `tasks/calamares-f3-gotchas.md`. Confirmación final del flujo 100% automático (rebuild+reinstall con los paquetes -3) **opcional/pendiente** |
-| F4 | Dual-boot real (T2, T3) | 🔒 bloqueada solo por F3 (F2.b/F2.c ✅) | Módulos custom `amicachy-foreign-os`, `amicachy-preflight`, `amicachy-postinstall.profiles`. Baselines Debian+Win11 ya disponibles para overlays |
+| F4 | Dual-boot real (T2, T3) | 🔓 desbloqueada — **plan listo** en `tasks/calamares-f4-plan.md` | Reusar ESP existente + módulo `amicachy-foreign-os` (chainload del SO previo). Mayormente config + verificación (los modos alongside/replace de Calamares salen solos; sd-boot autodetecta Windows). Baselines Debian+Win11 listas; test con `dev/dualboot-vm/` + `verify-untouched.sh` |
 | F5 | Branding Workbench/Amiga | ⏳ pendiente, paralelizable | QML branding + slideshow (port de `slideshow.py`) |
 | F6 | Módulos AmiCachy custom | 🔒 bloqueada por F3 | `amicachy-hardware`, `amicachy-profiles`, `amicachy-addons` (QML) + `amicachy-postinstall` (Python) |
 | F7 | Matriz completa T1–T6 | 🔒 bloqueada por F4, F6 | Validar con `verify-untouched.sh` |
@@ -135,23 +135,33 @@ por `--cpu-arch`, igual que hoy hace `build_iso.sh`. El paquete solo trae los mi
 
 ---
 
-## Próxima acción concreta — F3 (esqueleto Calamares, happy path T1)
+## Próxima acción concreta — F4 (dual-boot real)
 
-> **Plan detallado y aprobado en `tasks/calamares-f3-plan.md`** (2026-06-13).
-> Decisiones de alcance confirmadas: (1) boot entries vía **módulo Python**
-> `amicachy-postinstall`; (2) **squashfs target separado y limpio**; (3) **reemplazar
-> ya** el instalador PySide6 en el live.
+> **Plan detallado en `tasks/calamares-f4-plan.md`** (2026-06-14). Léelo entero;
+> resume el alcance, el módulo nuevo `amicachy-foreign-os`, los cambios de
+> `partition_amicachy.conf` (reuso de ESP) y el test T2/T3.
 
-F3.0 desbloqueó F3. Siguiente: crear `pkg/calamares-config-amicachy/` con
-`settings.conf` + módulos estándar (`partition`, `mount`, `unpackfs`, `fstab`,
-`locale`, `keyboard`, `users`, `services-systemd`, `initramfs`, `bootloader`,
-`umount`) y cambiar el autostart del live de `amicachy-installer` a `calamares`.
-El squashfs que despliega `unpackfs` debe incluir el paquete `amicachy-base` ya
-instalado — ése es el punto donde F3.0 se enchufa en la cadena.
+F3 quedó validado E2E. F4 = instalar AmiCachy junto a Windows/Linux sin tocarlos,
+reusar la ESP, y chainload del SO previo en systemd-boot. Mayormente **config +
+verificación** + el módulo Python `amicachy-foreign-os`. Empezar por leer el plan F4.
 
-Pendiente menor de integración (cuando exista el build del squashfs): que ese build
-añada `out/amicachy-base-*.pkg.tar.zst` a su repo local, análogo a cómo
-`tools/build_iso.sh` ya hace con `amiberry-*`.
+**Flujo de build/test (ya montado en F3):**
+```
+build_amiberry.sh --cpu-arch v3   (si falta amiberry)
+build_amicachy_base.sh            (si cambió amicachy-base)
+build_calamares_config.sh         (SIEMPRE que toques calamares-config; bump pkgrel!)
+build_calamares_compat.sh         (si falta calamares-compat-libs)
+build_target_rootfs.sh --cpu-arch v3   (si cambió el target; ~6 min Docker)
+sudo build_iso.sh --cpu-arch v3        (~15 min; integra todo)
+# Test T1 (disco vacío):
+dev_vm.sh boot-iso out/amicachy-v3-<fecha>-x86_64.iso --reset-scratch
+tools/boot_installed.sh                (arranca el disco instalado sin ISO)
+# Test T2/T3 (dual-boot):
+dev/dualboot-vm/scripts/run-test.sh --baseline {win11-ntfs|debian12-ext4-grub} --iso out/<iso>
+sudo dev/dualboot-vm/scripts/verify-untouched.sh --baseline ... --overlay overlays/...
+```
+⚠️ **Gotcha caché**: bump `pkgrel` en `calamares-config-amicachy` SIEMPRE que cambies
+sus ficheros, o la ISO reinstala la copia vieja cacheada (va por `-3`).
 
 ### Otras piezas en paralelo
 | Pieza | Estado |
