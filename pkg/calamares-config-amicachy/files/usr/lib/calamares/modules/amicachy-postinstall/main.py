@@ -7,16 +7,25 @@
 #
 # amicachy-postinstall: AmiCachy-specific post-install job.
 #
-# F3 implements only the 'profiles' sub-job: it writes the systemd-boot
-# loader.conf and the per-profile entries with the amiprofile= kernel
-# cmdline, which is the contractual API amilaunch.sh dispatches on
-# (inventory §6). The remaining sub-jobs (roms, addons, mac_fallback) and
-# reading a real profile selection from the QML pages land in F6.
+# F3 sub-jobs:
+#   - profiles:  write systemd-boot loader.conf + per-profile entries with the
+#                amiprofile= kernel cmdline (the contract amilaunch.sh dispatches
+#                on, inventory §6). Runs AFTER the standard `bootloader` module
+#                so it overwrites that module's generic entries (§9 risk #1).
+#   - home:      copy /etc/skel into /home/amiga. Calamares' users module skips
+#                skel when the home already exists — and it does here because the
+#                AMIGADATA partition is mounted at /home/amiga/Amiga, creating
+#                /home/amiga before user creation. Without this, ~/.bash_profile
+#                is missing and amilaunch never starts on tty1.
+#   - locale:    run locale-gen for the locales Calamares uncommented. Without
+#                pacstrap there is no pacman hook to do it, so the chosen locale
+#                (e.g. es_ES.UTF-8) would be absent and shells warn on every login.
 #
-# Runs AFTER the standard `bootloader` module so it overwrites the generic
-# loader.conf/entries that module writes (inventory §9 risk #1 — ordering).
+# The remaining sub-jobs (roms, addons, mac_fallback) and reading a real profile
+# selection from the QML pages land in F6.
 
 import os
+import shutil
 
 import libcalamares
 
@@ -110,6 +119,37 @@ def _write_boot_entries(root, cfg):
     return None
 
 
+def _populate_amiga_home(root):
+    """Copy /etc/skel into /home/amiga (Calamares' useradd skips skel because
+    the AMIGADATA mount pre-creates the home), then fix ownership. This is what
+    makes ~/.bash_profile exist so amilaunch starts on tty1."""
+    skel = os.path.join(root, "etc/skel")
+    home = os.path.join(root, "home/amiga")
+    if not os.path.isdir(skel) or not os.path.isdir(home):
+        libcalamares.utils.warning(
+            "amicachy-postinstall: skel or amiga home missing; skipping home setup"
+        )
+        return
+    for name in os.listdir(skel):
+        src = os.path.join(skel, name)
+        dst = os.path.join(home, name)
+        if os.path.exists(dst):
+            continue  # never clobber e.g. the AMIGADATA mount dir
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, symlinks=True)
+        else:
+            shutil.copy2(src, dst)
+    libcalamares.utils.target_env_call(["chown", "-R", "amiga:amiga", "/home/amiga"])
+    libcalamares.utils.debug("amicachy-postinstall: populated /home/amiga from /etc/skel")
+
+
+def _generate_locales():
+    """Run locale-gen for whatever Calamares uncommented in /etc/locale.gen.
+    Without pacstrap nothing else does it, so the chosen locale would be absent."""
+    rc = libcalamares.utils.target_env_call(["locale-gen"])
+    libcalamares.utils.debug("amicachy-postinstall: locale-gen returned {}".format(rc))
+
+
 def run():
     """AmiCachy post-install configuration."""
     root = libcalamares.globalstorage.value("rootMountPoint")
@@ -120,4 +160,10 @@ def run():
         )
 
     cfg = libcalamares.job.configuration
-    return _write_boot_entries(root, cfg)
+    error = _write_boot_entries(root, cfg)
+    if error:
+        return error
+
+    _populate_amiga_home(root)
+    _generate_locales()
+    return None
