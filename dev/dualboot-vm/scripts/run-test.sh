@@ -46,19 +46,22 @@ CPUS="4"
 DISCARD=0
 NO_OVERLAY=0
 BOOT_ORDER="dc,menu=on"   # CD first (so install media boots), then disk
+BOOT_SET=0                # 1 if --boot was given explicitly
 DISPLAY_MODE="gtk"
 MONITOR_STDIO=0
 EXTRA_QEMU_ARGS=()
 
 usage() {
     cat <<EOF
-Usage: $0 --baseline NAME --iso PATH [OPTIONS]
+Usage: $0 --baseline NAME [--iso PATH] [OPTIONS]
 
 Required:
   --baseline NAME      Name (without .qcow2) of a baseline in baselines/
-  --iso PATH           Path to the AmiCachy ISO to boot
 
 Options:
+  --iso PATH           AmiCachy ISO to boot as install CD. If omitted, no CD is
+                       attached and the VM boots straight off the disk (handy to
+                       check a baseline boots on its own before a dual-boot test).
   --memory SIZE        VM RAM (default: 4G)
   --cpus N             vCPUs (default: 4)
   --discard            Delete overlay on exit (default: keep with timestamp)
@@ -87,7 +90,7 @@ while [[ $# -gt 0 ]]; do
         --cpus)        CPUS="$2"; shift 2 ;;
         --discard)     DISCARD=1; shift ;;
         --no-overlay)  NO_OVERLAY=1; shift ;;
-        --boot)        BOOT_ORDER="$2"; shift 2 ;;
+        --boot)        BOOT_ORDER="$2"; BOOT_SET=1; shift 2 ;;
         --display)     DISPLAY_MODE="$2"; shift 2 ;;
         --monitor)     MONITOR_STDIO=1; shift ;;
         --)            shift; EXTRA_QEMU_ARGS=("$@"); break ;;
@@ -97,7 +100,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$BASELINE" ]] && { echo "ERROR: --baseline required" >&2; usage; }
-[[ -z "$ISO" ]] && { echo "ERROR: --iso required" >&2; usage; }
+
+# --iso is optional: without it, no install CD is attached and the VM boots
+# straight off the disk (e.g. to verify a baseline boots on its own before
+# attempting a dual-boot install on top of it).
+if [[ -z "$ISO" && $BOOT_SET -eq 0 ]]; then
+    BOOT_ORDER="c"   # disk only — there is no CD to boot
+fi
 
 # ---------------------------------------------------------------------------
 # Validate prerequisites
@@ -110,8 +119,10 @@ BASELINE_PATH="$BASELINES_DIR/${BASELINE}.qcow2"
     exit 2
 }
 
-[[ -f "$ISO" ]] || { echo "ERROR: ISO not found: $ISO" >&2; exit 2; }
-ISO="$(cd "$(dirname "$ISO")" && pwd)/$(basename "$ISO")"
+if [[ -n "$ISO" ]]; then
+    [[ -f "$ISO" ]] || { echo "ERROR: ISO not found: $ISO" >&2; exit 2; }
+    ISO="$(cd "$(dirname "$ISO")" && pwd)/$(basename "$ISO")"
+fi
 
 [[ -e "$OVMF_CODE" ]] || { echo "ERROR: OVMF_CODE missing: $OVMF_CODE" >&2; exit 3; }
 [[ -f "$OVMF_VARS_TEMPLATE" ]] || { echo "ERROR: OVMF_VARS template missing: $OVMF_VARS_TEMPLATE" >&2; exit 3; }
@@ -172,10 +183,8 @@ QEMU_ARGS=(
     # Main disk: baseline overlay (or baseline itself if --no-overlay)
     -drive "file=${DISK_PATH},format=qcow2,if=virtio,cache=writeback"
 
-    # AmiCachy ISO as bootable CD
-    -drive "file=${ISO},format=raw,if=ide,media=cdrom,readonly=on"
-
-    # Boot order: CD first (install), then disk (post-install reboot)
+    # Boot order: CD first (install), then disk (post-install reboot). With no
+    # ISO this was forced to "c" above (disk only).
     -boot "$BOOT_ORDER"
 
     # User-mode networking (no privileges needed). Forward host:2222 → guest:22.
@@ -192,6 +201,11 @@ QEMU_ARGS=(
     -serial "file:${SERIAL_LOG}"
 )
 
+# Attach the install ISO as a bootable CD only when one was given.
+if [[ -n "$ISO" ]]; then
+    QEMU_ARGS+=(-drive "file=${ISO},format=raw,if=ide,media=cdrom,readonly=on")
+fi
+
 if [[ $MONITOR_STDIO -eq 1 ]]; then
     QEMU_ARGS+=(-monitor stdio)
 else
@@ -205,7 +219,7 @@ QEMU_ARGS+=("${EXTRA_QEMU_ARGS[@]}")
 # ---------------------------------------------------------------------------
 echo ">>> Run ID:     $RUN_ID"
 echo ">>> Disk:       $DISK_PATH"
-echo ">>> ISO:        $ISO"
+echo ">>> ISO:        ${ISO:-<none> (booting disk only)}"
 echo ">>> Monitor:    ${MONITOR_SOCK} (use 'socat - UNIX-CONNECT:${MONITOR_SOCK}')"
 echo ">>> Memory:     $MEMORY    CPUs: $CPUS"
 echo ">>> Launching QEMU..."
