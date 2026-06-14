@@ -363,6 +363,11 @@ rename_iso_output() {
     local renamed="${OUT_DIR}/amicachy-${CPU_ARCH}-${date_part}-x86_64.iso"
     mv -f "$raw" "$renamed"
     echo ":: Renamed -> ${renamed##*/}"
+    # Stable symlink to the freshest build, so 'boot-iso' / test scripts always
+    # pick the latest without chasing the date in the filename (which bites when
+    # the day rolls over mid-session).
+    ln -sf "${renamed##*/}" "${OUT_DIR}/amicachy-${CPU_ARCH}-latest.iso"
+    echo ":: Symlink   -> amicachy-${CPU_ARCH}-latest.iso"
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }

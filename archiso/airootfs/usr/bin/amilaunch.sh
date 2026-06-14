@@ -367,9 +367,28 @@ run_installer() {
     # Wayland session env) elevates without a prompt. This runs only under
     # amiprofile=installer, which is never generated on an installed target, so
     # the same script shipped in amicachy-base is inert there.
-    cage -- sudo -E calamares >> "$log" 2>&1
+    #
+    # LANG=en_GB.UTF-8: AmiCachy is a European distro, so Calamares defaults its
+    # UI language to British English (the welcome_amicachy.conf has geoip off, so
+    # the process LANG decides). The user can still pick another language.
+    cage -- sudo -E env LANG=en_GB.UTF-8 LANGUAGE=en_GB:en calamares >> "$log" 2>&1
     local rc=$?
 
+    if [[ $rc -eq 0 ]]; then
+        # Calamares finished and the user chose NOT to reboot now ("Reiniciar
+        # ahora" unchecked). Show a clean "installed" screen instead of the
+        # debug fallback below, so it doesn't look unfinished.
+        exec cage -- foot -e bash -c "
+            clear
+            printf '\n\n   \033[1;32m✓ AmiCachy ya está instalado.\033[0m\n\n'
+            printf '   Reinicia para empezar a usarlo:   \033[1msudo reboot\033[0m\n'
+            printf '   O apaga el equipo:                \033[1msudo poweroff\033[0m\n\n'
+            printf '   Sigues en el entorno «live»; esta terminal es para ti.\n\n'
+            exec bash
+        " || exec bash
+    fi
+
+    # rc != 0 → Calamares failed to start: show the debug log.
     printf '\033[H\033[2J\033[3J' > /dev/tty1 2>/dev/null || true
     {
         echo "AmiCachy installer exited before showing the UI."
