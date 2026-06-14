@@ -12,11 +12,12 @@
 #                amiprofile= kernel cmdline (the contract amilaunch.sh dispatches
 #                on, inventory §6). Runs AFTER the standard `bootloader` module
 #                so it overwrites that module's generic entries (§9 risk #1).
-#   - home:      copy /etc/skel into /home/amiga. Calamares' users module skips
-#                skel when the home already exists — and it does here because the
-#                AMIGADATA partition is mounted at /home/amiga/Amiga, creating
-#                /home/amiga before user creation. Without this, ~/.bash_profile
-#                is missing and amilaunch never starts on tty1.
+#   - home:      copy /etc/skel into /home/amiga. The AMIGADATA partition mounts
+#                at /home/amiga/Amiga, so /home/amiga already exists when Calamares'
+#                useradd runs and useradd -m skips skel — without this copy
+#                ~/.bash_profile is missing and amilaunch never starts on tty1
+#                (F3 gotcha #5). Copies without clobbering the mount dir, then
+#                fixes ownership.
 #   - locale:    run locale-gen for the locales Calamares uncommented. Without
 #                pacstrap there is no pacman hook to do it, so the chosen locale
 #                (e.g. es_ES.UTF-8) would be absent and shells warn on every login.
@@ -120,9 +121,9 @@ def _write_boot_entries(root, cfg):
 
 
 def _populate_amiga_home(root):
-    """Copy /etc/skel into /home/amiga (Calamares' useradd skips skel because
-    the AMIGADATA mount pre-creates the home), then fix ownership. This is what
-    makes ~/.bash_profile exist so amilaunch starts on tty1."""
+    """Copy /etc/skel into /home/amiga (Calamares' useradd skips skel because the
+    AMIGADATA mount at /home/amiga/Amiga pre-creates the home), then fix ownership.
+    This is what makes ~/.bash_profile exist so amilaunch starts on tty1."""
     skel = os.path.join(root, "etc/skel")
     home = os.path.join(root, "home/amiga")
     if not os.path.isdir(skel) or not os.path.isdir(home):

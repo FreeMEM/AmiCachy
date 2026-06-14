@@ -14,11 +14,23 @@
 - ✅ C: `settings.conf` → `amicachy-foreign-os` en `exec` tras `amicachy-postinstall`.
 - ✅ PKGBUILD pkgrel → 5.
 
-**Decisiones tomadas al implementar:**
-- **AMIGADATA = directorio en dual-boot** (no 2ª partición). En *alongside*/*replace*
-  Calamares instala una sola raíz; `/home/amiga/Amiga` queda como dir. En dual-boot
-  `useradd -m` copia skel él mismo (no hay mount que pre-cree /home/amiga), así que el
-  gotcha #5 no se da; `amicachy-postinstall` es idempotente y solo hace el chown.
+**Decisiones tomadas al implementar (AMIGADATA — historia, leer entera):**
+La decisión osciló en la sesión del 2026-06-14 y aterrizó así (pkgrel **-8**):
+- **AMIGADATA SEPARADA por defecto**, bien dimensionada: `partitionLayout` =
+  AMICACHY (/, **fijo 20G**) + AMIGADATA (/home/amiga/Amiga, **100% del resto** = el
+  grueso para los HDF). Aplica igual en *erase* (T1) y en *alongside*/*replace*
+  (Calamares carva el par en el hueco — verificado: alongside SÍ aplica el layout).
+- **Por qué separada**: una reinstalación puede "Reemplazar" solo AMICACHY y
+  **conservar la librería Amiga** en AMIGADATA. Es el valor real que pedía el usuario.
+- **Opt-out** = "Particionado manual" (una sola partición). Un *toggle* on/off bonito
+  dentro del instalador automático **exige compilar Calamares desde fuente** (el
+  `partitionLayout` se lee en config-time, `PartitionViewStep.cpp:945`; la GUI de
+  particionado es C++; hoy consumimos el binario `cachyos-calamares`, no lo
+  compilamos). Se descartó por coste; queda como posible fase futura (de paso
+  permitiría eliminar el shim `calamares-compat-libs`).
+- **Gotcha #5 vigente**: AMIGADATA monta en /home/amiga/Amiga → `useradd -m` salta
+  skel → `amicachy-postinstall` lo copia (imprescindible).
+- (Pendrive: cosa aparte, label `AMICACHY_DATA` por base inmutable; no confundir.)
 - **Riesgo a vigilar en T2 (Windows)**: la ESP de Win11 suele ser **~100 MB**. Como
   montamos la ESP en `/boot` y systemd-boot guarda kernel+initramfs ahí, el initramfs
   de cachyos (con firmware) **podría no caber en 100 MB**. T3 (Debian, ESP ~512 MB)
@@ -28,8 +40,6 @@
 **Pendiente: build de ISO + test E2E T2/T3** (lo corre el usuario, ver §Verificación).
 
 ---
-
-## Context original
 
 ## Context
 
@@ -62,12 +72,9 @@ Hoy fuerza `initialPartitioningChoice: erase` + `partitionLayout` de 3 particion
   el `bootmgfw.efi` de Windows). Verificar/ajustar `efiSystemPartition` y el flag de
   reuso. **Probar con verify-untouched que la ESP no cambia de hash salvo los
   ficheros que AmiCachy añade.**
-- **AMIGADATA en dual-boot**: en *alongside*/*replace* NO se crea partición de datos
-  separada (Calamares instala una sola raíz en el hueco). `/home/amiga/Amiga` queda
-  como **directorio** en la raíz (lo puebla `amicachy-postinstall` desde skel; el
-  módulo `fstab` solo añade AMIGADATA si existe). Solo *erase* (T1) mantiene las 3
-  particiones. **Decisión tomada (2026-06-14): dir en dual-boot** (ver Estado de
-  implementación arriba). No se fuerzan 2 particiones en el hueco.
+- **AMIGADATA separada por defecto** (AMICACHY / fijo 20G + AMIGADATA el resto), en
+  T1 y en dual-boot (Calamares carva el par en el hueco). Ver "Decisiones tomadas al
+  implementar" arriba para el porqué (supervivencia a reinstalación) y el opt-out.
 
 ### B. Módulo Python `amicachy-foreign-os` (nuevo) — chainload del SO previo
 Vive en `pkg/calamares-config-amicachy/files/usr/lib/calamares/modules/amicachy-foreign-os/`

@@ -47,8 +47,9 @@ AMIGADATA se monta en `/home/amiga/Amiga`, así que **`/home/amiga` ya existe** 
 Calamares crea el usuario → `useradd -m` **no copia skel** si el home existe → falta
 `~/.bash_profile` → la shell de login en tty1 no ejecuta amilaunch → cae a bash.
 **Fix:** `amicachy-postinstall` copia `/etc/skel` a `/home/amiga` (sin pisar el dir
-`Amiga`) + `chown amiga:amiga`. **Ojo en F4**: cualquier partición montada bajo el
-home recrea este problema.
+`Amiga`) + `chown amiga:amiga`. **Vigente** (pkgrel -8): AMIGADATA volvió como
+partición por defecto, así que este gotcha sigue activo. Cualquier partición montada
+bajo el home lo recrea.
 
 ## 6. Locale no generado + keymap de consola
 Sin pacstrap no hay hook que ejecute `locale-gen` → el locale elegido (es_ES.UTF-8)
