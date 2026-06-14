@@ -45,6 +45,8 @@ MEMORY="4G"
 CPUS="4"
 DISCARD=0
 NO_OVERLAY=0
+USE_OVERLAY=""            # boot this existing overlay instead of creating one
+REUSE_OVERLAY=0
 BOOT_ORDER="dc,menu=on"   # CD first (so install media boots), then disk
 BOOT_SET=0                # 1 if --boot was given explicitly
 DISPLAY_MODE="gtk"
@@ -67,6 +69,10 @@ Options:
   --discard            Delete overlay on exit (default: keep with timestamp)
   --no-overlay         DESTRUCTIVE: write directly to the baseline qcow2
                        (used by baseline-build scripts; never for tests)
+  --overlay PATH       Boot an EXISTING overlay (e.g. the disk from a prior
+                       install) instead of creating a fresh one. Reuses that
+                       run's OVMF VARS so the installed boot manager is found.
+                       --baseline not needed with this.
   --boot ORDER         QEMU -boot order (default: dc,menu=on)
   --display MODE       QEMU -display mode: gtk, sdl, none (default: gtk)
   --monitor            Attach QEMU monitor to stdio (default: unix socket in logs/)
@@ -90,6 +96,7 @@ while [[ $# -gt 0 ]]; do
         --cpus)        CPUS="$2"; shift 2 ;;
         --discard)     DISCARD=1; shift ;;
         --no-overlay)  NO_OVERLAY=1; shift ;;
+        --overlay)     USE_OVERLAY="$2"; shift 2 ;;
         --boot)        BOOT_ORDER="$2"; BOOT_SET=1; shift 2 ;;
         --display)     DISPLAY_MODE="$2"; shift 2 ;;
         --monitor)     MONITOR_STDIO=1; shift ;;
@@ -99,11 +106,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -z "$BASELINE" ]] && { echo "ERROR: --baseline required" >&2; usage; }
+# --baseline is required to create an overlay; --overlay supplies its own disk
+# and makes --baseline unnecessary.
+if [[ -z "$BASELINE" && -z "$USE_OVERLAY" ]]; then
+    echo "ERROR: --baseline (or --overlay) required" >&2; usage
+fi
 
 # --iso is optional: without it, no install CD is attached and the VM boots
-# straight off the disk (e.g. to verify a baseline boots on its own before
-# attempting a dual-boot install on top of it).
+# straight off the disk (e.g. to verify a baseline boots on its own, or to boot
+# the disk produced by a prior install via --overlay).
 if [[ -z "$ISO" && $BOOT_SET -eq 0 ]]; then
     BOOT_ORDER="c"   # disk only — there is no CD to boot
 fi
@@ -111,13 +122,15 @@ fi
 # ---------------------------------------------------------------------------
 # Validate prerequisites
 # ---------------------------------------------------------------------------
-BASELINE_PATH="$BASELINES_DIR/${BASELINE}.qcow2"
-[[ -f "$BASELINE_PATH" ]] || {
-    echo "ERROR: Baseline not found: $BASELINE_PATH" >&2
-    echo "Available baselines:" >&2
-    ls -1 "$BASELINES_DIR"/*.qcow2 2>/dev/null | sed 's|.*/||;s|\.qcow2$||;s|^|  - |' >&2
-    exit 2
-}
+if [[ -z "$USE_OVERLAY" ]]; then
+    BASELINE_PATH="$BASELINES_DIR/${BASELINE}.qcow2"
+    [[ -f "$BASELINE_PATH" ]] || {
+        echo "ERROR: Baseline not found: $BASELINE_PATH" >&2
+        echo "Available baselines:" >&2
+        ls -1 "$BASELINES_DIR"/*.qcow2 2>/dev/null | sed 's|.*/||;s|\.qcow2$||;s|^|  - |' >&2
+        exit 2
+    }
+fi
 
 if [[ -n "$ISO" ]]; then
     [[ -f "$ISO" ]] || { echo "ERROR: ISO not found: $ISO" >&2; exit 2; }
@@ -131,21 +144,42 @@ fi
 # ---------------------------------------------------------------------------
 # Set up per-run artifacts
 # ---------------------------------------------------------------------------
-TS="$(date +%Y%m%d-%H%M%S)"
-RUN_ID="${BASELINE}-${TS}"
-
-if [[ $NO_OVERLAY -eq 1 ]]; then
-    echo ">>> WARNING: --no-overlay set, baseline $BASELINE_PATH will be modified!"
-    sleep 2
-    DISK_PATH="$BASELINE_PATH"
+if [[ -n "$USE_OVERLAY" ]]; then
+    # Boot an existing overlay (e.g. the disk from a prior install) as-is.
+    [[ -f "$USE_OVERLAY" ]] || { echo "ERROR: overlay not found: $USE_OVERLAY" >&2; exit 2; }
+    DISK_PATH="$(cd "$(dirname "$USE_OVERLAY")" && pwd)/$(basename "$USE_OVERLAY")"
+    RUN_ID="$(basename "$USE_OVERLAY" .qcow2)"
+    REUSE_OVERLAY=1
+    echo ">>> Booting existing overlay: $DISK_PATH"
 else
-    DISK_PATH="$OVERLAYS_DIR/${RUN_ID}.qcow2"
-    echo ">>> Creating overlay: $DISK_PATH (backed by $BASELINE)"
-    qemu-img create -q -f qcow2 -b "$BASELINE_PATH" -F qcow2 "$DISK_PATH"
+    TS="$(date +%Y%m%d-%H%M%S)"
+    RUN_ID="${BASELINE}-${TS}"
+    if [[ $NO_OVERLAY -eq 1 ]]; then
+        echo ">>> WARNING: --no-overlay set, baseline $BASELINE_PATH will be modified!"
+        sleep 2
+        DISK_PATH="$BASELINE_PATH"
+    else
+        DISK_PATH="$OVERLAYS_DIR/${RUN_ID}.qcow2"
+        echo ">>> Creating overlay: $DISK_PATH (backed by $BASELINE)"
+        qemu-img create -q -f qcow2 -b "$BASELINE_PATH" -F qcow2 "$DISK_PATH"
+    fi
 fi
 
+# Per-run OVMF VARS (NVRAM). For --overlay we reuse the VARS written during that
+# run's install (it holds the boot entries efibootmgr added, e.g. AmiCachy's
+# systemd-boot); a fresh template would make the firmware fall back to the
+# removable path and likely boot the other OS instead.
 VARS_PATH="$OVMF_DIR/OVMF_VARS-run-${RUN_ID}.4m.fd"
-cp "$OVMF_VARS_TEMPLATE" "$VARS_PATH"
+if [[ $REUSE_OVERLAY -eq 1 && -f "$VARS_PATH" ]]; then
+    echo ">>> Reusing matching OVMF VARS (NVRAM): $VARS_PATH"
+elif [[ $REUSE_OVERLAY -eq 1 ]]; then
+    echo ">>> WARNING: no matching VARS ($VARS_PATH) for this overlay — using a fresh"
+    echo "    template. The firmware may boot the removable fallback (the other OS)"
+    echo "    instead of the installed boot manager."
+    cp "$OVMF_VARS_TEMPLATE" "$VARS_PATH"
+else
+    cp "$OVMF_VARS_TEMPLATE" "$VARS_PATH"
+fi
 
 SERIAL_LOG="$LOGS_DIR/${RUN_ID}.serial.log"
 MONITOR_SOCK="$LOGS_DIR/${RUN_ID}.monitor.sock"
@@ -155,7 +189,7 @@ MONITOR_SOCK="$LOGS_DIR/${RUN_ID}.monitor.sock"
 # ---------------------------------------------------------------------------
 cleanup() {
     rm -f "$MONITOR_SOCK"
-    if [[ $DISCARD -eq 1 && $NO_OVERLAY -eq 0 ]]; then
+    if [[ $DISCARD -eq 1 && $NO_OVERLAY -eq 0 && $REUSE_OVERLAY -eq 0 ]]; then
         echo ">>> Discarding overlay $DISK_PATH"
         rm -f "$DISK_PATH" "$VARS_PATH"
     else
