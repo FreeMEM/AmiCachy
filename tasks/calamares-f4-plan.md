@@ -1,8 +1,35 @@
 # Plan F4 — Dual-boot real (T2 Windows, T3 otro Linux)
 
-> Escrito 2026-06-14 al cerrar F3. Para implementar en una **sesión nueva con
-> contexto limpio**. Lee antes: `tasks/calamares-f3-gotchas.md` (gotchas que
-> reaparecen) y `docs/calamares-migration-inventory.md` §6–9.
+> Escrito 2026-06-14 al cerrar F3. Lee antes: `tasks/calamares-f3-gotchas.md`
+> (gotchas que reaparecen) y `docs/calamares-migration-inventory.md` §6–9.
+
+## Estado de implementación (2026-06-14)
+
+**Código F4 implementado** (commit pendiente, paquete `calamares-config-amicachy-5`):
+- ✅ A: `partition_amicachy.conf` → `initialPartitioningChoice: none` (ya no fuerza
+  erase; aparecen *alongside*/*replace* solos). Comentado el reuso de ESP.
+- ✅ B: módulo nuevo `amicachy-foreign-os` (`main.py` + `module.desc` + `.conf`).
+  Validado con ESP sintética: Windows→`90-windows.conf`, Debian→`91-debian.conf`,
+  excluye `systemd`/`BOOT`/`Linux`; en disco vacío no escribe nada.
+- ✅ C: `settings.conf` → `amicachy-foreign-os` en `exec` tras `amicachy-postinstall`.
+- ✅ PKGBUILD pkgrel → 5.
+
+**Decisiones tomadas al implementar:**
+- **AMIGADATA = directorio en dual-boot** (no 2ª partición). En *alongside*/*replace*
+  Calamares instala una sola raíz; `/home/amiga/Amiga` queda como dir. En dual-boot
+  `useradd -m` copia skel él mismo (no hay mount que pre-cree /home/amiga), así que el
+  gotcha #5 no se da; `amicachy-postinstall` es idempotente y solo hace el chown.
+- **Riesgo a vigilar en T2 (Windows)**: la ESP de Win11 suele ser **~100 MB**. Como
+  montamos la ESP en `/boot` y systemd-boot guarda kernel+initramfs ahí, el initramfs
+  de cachyos (con firmware) **podría no caber en 100 MB**. T3 (Debian, ESP ~512 MB)
+  no debería tener este problema. Si T2 desborda la ESP → follow-up (XBOOTLDR aparte
+  o initramfs reducido); NO bloquea el mecanismo de chainload en sí.
+
+**Pendiente: build de ISO + test E2E T2/T3** (lo corre el usuario, ver §Verificación).
+
+---
+
+## Context original
 
 ## Context
 
@@ -39,9 +66,8 @@ Hoy fuerza `initialPartitioningChoice: erase` + `partitionLayout` de 3 particion
   separada (Calamares instala una sola raíz en el hueco). `/home/amiga/Amiga` queda
   como **directorio** en la raíz (lo puebla `amicachy-postinstall` desde skel; el
   módulo `fstab` solo añade AMIGADATA si existe). Solo *erase* (T1) mantiene las 3
-  particiones. **Decisión a confirmar**: ¿aceptable AMIGADATA-como-dir en dual-boot,
-  o se quiere forzar 2 particiones en el hueco (más complejo, requeriría layout
-  custom)? Recomendado: dir en dual-boot.
+  particiones. **Decisión tomada (2026-06-14): dir en dual-boot** (ver Estado de
+  implementación arriba). No se fuerzan 2 particiones en el hueco.
 
 ### B. Módulo Python `amicachy-foreign-os` (nuevo) — chainload del SO previo
 Vive en `pkg/calamares-config-amicachy/files/usr/lib/calamares/modules/amicachy-foreign-os/`

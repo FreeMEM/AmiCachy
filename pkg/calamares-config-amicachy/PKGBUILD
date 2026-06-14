@@ -24,7 +24,7 @@ pkgver=1.0.0
 # pkgrel bumped to force pacman past its cache: rebuilding at the same
 # version meant mkarchiso reinstalled the cached older package (stale config +
 # old branding). Bump pkgrel whenever this package's files change.
-pkgrel=4
+pkgrel=5
 pkgdesc="Calamares branding and module configuration for the AmiCachy installer"
 arch=('any')
 url="https://github.com/FreeMEM/AmiCachy"
