@@ -16,8 +16,8 @@ dev/dualboot-vm/
 │   ├── run-test.sh             # Launch a VM with a baseline + AmiCachy ISO
 │   ├── snapshot-reset.sh       # Clean up overlays / per-run OVMF VARS / logs
 │   ├── verify-untouched.sh     # Compare baseline vs overlay partition hashes
-│   ├── build-baseline-debian.sh   # (F2.b — pending)
-│   └── build-baseline-windows.sh  # (F2.c — pending)
+│   ├── build-baseline-debian.sh   # Build the Debian (ext4+GRUB-EFI) baseline
+│   └── build-baseline-windows.sh  # Build the Win11 (NTFS+ESP) baseline (semi-manual)
 ├── ovmf/
 │   ├── OVMF_CODE.4m.fd            # symlink → /usr/share/edk2/x64/...
 │   └── OVMF_VARS-template.4m.fd   # template (copied per run)
@@ -40,13 +40,30 @@ KVM access: `/dev/kvm` must be readable (`crw-rw-rw-` works; group `kvm` also fi
 ### 1. Build (or copy) a baseline
 
 Baselines are large qcow2 files with a pre-installed OS, **never modified by
-test runs**. Build them once with the `build-baseline-*.sh` scripts (F2.b, F2.c)
-or copy them in manually:
+test runs**. Build them once:
 
 ```bash
-# Empty 50 GB disk (no OS installed, for "fresh install" tests)
+# Empty 50 GB disk (no OS installed, for "fresh install" / erase tests)
 qemu-img create -f qcow2 baselines/empty-50g.qcow2 50G
+
+# Debian (ext4 + GRUB-EFI) — headless, unattended via preseed (~10-20 min,
+# network-bound). The installer ISO is downloaded + checksum-verified into
+# .cache/ once, then reused. Output: baselines/debian12-ext4-grub.qcow2
+./scripts/build-baseline-debian.sh
+
+# Windows 11 (NTFS + ESP) — semi-manual, see the caveat below.
+# Output: baselines/win11-ntfs.qcow2  (account tester/tester)
+./scripts/build-baseline-windows.sh
 ```
+
+> **The Windows baseline is semi-manual.** Microsoft blocks automated ISO
+> downloads by IP, so you normally drop your own `Win11_*.iso` into
+> `.cache/` first (the script also tries the vendored `Mido.sh`). And on
+> 24H2/25H2 the new setup engine (`SetupPrep.exe`) ignores `autounattend.xml`
+> during the windowsPE phase, so you still click through ~5 prompts (product
+> key / edition / partition) during the build; the `specialize` and
+> `oobeSystem` passes (account creation, OOBE skip, locale) **do** apply. Full
+> details and the exact manual steps are in the script header.
 
 ### 2. Run a test
 
