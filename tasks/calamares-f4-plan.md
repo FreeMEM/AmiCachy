@@ -31,11 +31,25 @@ La decisión osciló en la sesión del 2026-06-14 y aterrizó así (pkgrel **-8*
 - **Gotcha #5 vigente**: AMIGADATA monta en /home/amiga/Amiga → `useradd -m` salta
   skel → `amicachy-postinstall` lo copia (imprescindible).
 - (Pendrive: cosa aparte, label `AMICACHY_DATA` por base inmutable; no confundir.)
-- **Riesgo a vigilar en T2 (Windows)**: la ESP de Win11 suele ser **~100 MB**. Como
-  montamos la ESP en `/boot` y systemd-boot guarda kernel+initramfs ahí, el initramfs
-  de cachyos (con firmware) **podría no caber en 100 MB**. T3 (Debian, ESP ~512 MB)
-  no debería tener este problema. Si T2 desborda la ESP → follow-up (XBOOTLDR aparte
-  o initramfs reducido); NO bloquea el mecanismo de chainload en sí.
+- **T2 (Windows) — BLOQUEO REAL ENCONTRADO (2026-06-15): NTFS sucia por Fast Startup.**
+  La baseline win11-ntfs tiene ESP de **512 MiB** (no ~100; mi nota anterior sobre la
+  ESP era especulativa y FALSA para nuestra baseline). El bloqueo de verdad: Calamares
+  **NO ofrece "Instalación paralela"** sobre Windows — solo Reemplazar (que borra el
+  C:)/Borrar/Manual. Causa: `PartUtils::canBeResized()` (ChoicePage:1354) falla porque
+  la NTFS está **"sucia"/hibernada**: Win11 trae **Fast Startup** activo y `shutdown /s`
+  hace un apagado híbrido que hiberna el kernel → `ntfsresize --info` (que KPMcore usa
+  para calcular el shrink) se niega → la partición no es redimensionable → botón oculto.
+  `ntfsresize` SÍ está en el live (vía `ntfs-3g`), así que no es falta de herramienta.
+  - **Fix baseline (hecho)**: `build-baseline-windows.sh` ahora hace `powercfg /h off`
+    antes del `shutdown /s` → NTFS limpia → redimensionable. Requiere rebuild de la
+    baseline (semi-manual) o, atajo, arrancar Windows con `--no-overlay` y hacer
+    `powercfg /h off` + apagar.
+  - **Fix usuarios reales (pendiente, el de verdad)**: dual-boot con Windows EXIGE
+    desactivar Fast Startup (gotcha universal Windows+Linux). El instalador debería
+    llevar un **`amicachy-preflight`** que detecte la NTFS sucia y **avise claramente**
+    ("reinicia a Windows, desactiva Inicio rápido y apaga del todo") en vez de ocultar
+    alongside y dejar solo el Reemplazar destructivo. Es el componente D del plan, ahora
+    claramente necesario.
 
 **Pendiente: build de ISO + test E2E T2/T3** (lo corre el usuario, ver §Verificación).
 

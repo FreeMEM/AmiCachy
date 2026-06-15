@@ -65,6 +65,18 @@ qemu-img create -f qcow2 baselines/empty-50g.qcow2 50G
 > `oobeSystem` passes (account creation, OOBE skip, locale) **do** apply. Full
 > details and the exact manual steps are in the script header.
 
+> **Clean NTFS = resizable (the dual-boot prerequisite).** The build runs
+> `powercfg /h off` before shutting Windows down, so the captured NTFS is left
+> **clean and shrinkable**. Windows' default *Fast Startup* turns `shutdown /s`
+> into a hybrid (hibernating) shutdown that marks the NTFS **dirty**, and then
+> `ntfsresize` — and so Calamares' **"Install alongside"** — refuses to shrink
+> it: you'd be left with only the destructive **"Replace partition"** (which
+> deletes Windows' C:). The same applies to **real users**: dual-booting on top
+> of an existing Windows requires disabling Fast Startup and fully shutting down
+> first, otherwise the installer can't make room without wiping Windows. A
+> dirty-NTFS preflight warning in the installer is tracked in
+> `tasks/calamares-f4-plan.md` (component D).
+
 ### 2. Run a test
 
 ```bash

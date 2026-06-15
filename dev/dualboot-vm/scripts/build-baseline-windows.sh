@@ -153,9 +153,14 @@ trap 'rm -rf "$WORK"' EXIT
 #    recommended layout — matches what a UEFI dualboot expects).
 #  - creates a local "tester" admin account (no Microsoft account screen
 #    via BypassNRO + Skip*OOBE flags).
-#  - autologs into tester on first boot and immediately runs
-#    `shutdown /s /t 0`, so QEMU exits via ACPI power-off and we can
-#    detect a clean end-of-install.
+#  - autologs into tester on first boot, disables hibernation/Fast Startup
+#    (`powercfg /h off`) and then runs `shutdown /s /t 0`. The powercfg step
+#    is REQUIRED for dual-boot: without it Win11's default Fast Startup turns
+#    `shutdown /s` into a hybrid (hibernating) shutdown that marks the NTFS
+#    dirty, and then `ntfsresize` / Calamares "Install alongside" refuses to
+#    shrink it (you'd only get the destructive "Replace partition"). With it,
+#    the shutdown is full and clean, so QEMU exits via ACPI power-off and the
+#    captured baseline's NTFS is resizable.
 cat > "$WORK/autounattend.xml" <<'AUTOUNATTEND'
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
@@ -349,6 +354,11 @@ cat > "$WORK/autounattend.xml" <<'AUTOUNATTEND'
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
+          <Description>Disable hibernation / Fast Startup so 'shutdown /s' is a FULL shutdown and leaves the NTFS clean — otherwise the hybrid shutdown marks the volume dirty and Linux (ntfsresize / Calamares "Install alongside") refuses to shrink it for dual-boot.</Description>
+          <CommandLine>powercfg /h off</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
           <Description>Power off after first logon — signals build done</Description>
           <CommandLine>shutdown /s /t 0</CommandLine>
         </SynchronousCommand>
