@@ -65,6 +65,28 @@ This:
 5. On exit, **keeps the overlay** so you can inspect what the installer did
    (use `--discard` to remove it instead).
 
+> Each launch creates a **new timestamped overlay**. After installing, note
+> which overlay is the install target — it's the **big** one (several GB, the
+> squashfs got deployed there). The tiny overlays are throwaway boots.
+
+### 2b. Boot a disk without the installer (`--iso` is optional)
+
+```bash
+# Boot the disk you JUST INSTALLED to, to see the systemd-boot menu and confirm
+# the other OS still boots. Use the big post-install overlay:
+./scripts/run-test.sh --overlay overlays/debian12-ext4-grub-<ts>.qcow2
+
+# Boot a baseline on its own (fresh overlay), e.g. to confirm it boots before a
+# dual-boot test:
+./scripts/run-test.sh --baseline debian12-ext4-grub
+```
+
+`--overlay` boots an existing overlay as-is and **reuses that run's OVMF VARS**
+(the NVRAM `efibootmgr` wrote during install), so the firmware finds AmiCachy's
+systemd-boot instead of falling back to the other OS's removable loader. Without
+`--iso` and without `--overlay`, a fresh baseline overlay boots straight off the
+disk. Neither needs `--baseline` when `--overlay` is given.
+
 ### 3. Verify the pre-existing OS is intact
 
 After running a dual-boot test (e.g. against `debian12-ext4`):
@@ -79,15 +101,32 @@ Mounts both qcow2 read-only via `qemu-nbd`, hashes every partition, and prints
 a comparison table. A `CHANGED` row on a pre-existing OS partition means
 **the installer modified data that belongs to the other OS** — bug to fix.
 
+> **Two gotchas when reading the output:**
+> - **Verify the right overlay.** Each `run-test.sh` launch makes a new
+>   timestamped overlay; pass the **big** post-install one (several GB), not a
+>   tiny throwaway-boot overlay, or you'll be diffing a disk nothing installed to.
+> - **Alongside shrinks the neighbour on purpose.** "Install alongside" resizes
+>   the other OS's partition, so that partition **will** show `CHANGED` — the
+>   `resize2fs` preserves the data, so it's expected, not the bug. The real proof
+>   for alongside is "the other OS still boots from the menu". The bug this guards
+>   against is a `CHANGED`/`DELETED` partition you did **not** choose to touch
+>   (e.g. the ESP reformatted, or a partition you didn't resize).
+
 ### 4. Clean up
 
 ```bash
-# Interactive
-./scripts/snapshot-reset.sh
+# This bench's overlays / per-run VARS / logs only:
+./scripts/snapshot-reset.sh                       # interactive
+./scripts/snapshot-reset.sh --yes --older-than 7  # CI: older than 7 days
 
-# CI: delete artifacts older than 7 days, no prompt
-./scripts/snapshot-reset.sh --yes --older-than 7
+# Repo-wide reclaim (out/ stale ISOs + this bench's test artifacts + dev/ scratch).
+# Dry-run by default; baselines and the newest ISO are always kept:
+../../tools/clean.sh            # show what it would free
+../../tools/clean.sh --yes      # do the safe sweep
 ```
+
+The overlays here are the #1 space hog (each install overlay is several GB). See
+`tools/clean.sh --help` for the `--pendrives` / `--loaded` / `--dev-vms` opt-ins.
 
 ## Test matrix (from migration plan F7)
 
@@ -126,9 +165,11 @@ No bridge configuration needed, no root privileges to launch the VM.
 
 ## Notes & limitations
 
-- **OVMF VARS are per-run**: each test gets fresh UEFI NVRAM. If you want to
-  test "second boot after install" without re-running the ISO, pass
-  `--no-overlay` and inspect manually (advanced, destructive to the baseline).
+- **OVMF VARS are per-run**: each test gets fresh UEFI NVRAM. To boot the
+  installed system ("second boot after install") without re-running the ISO,
+  use `--overlay <the post-install overlay>` — it reuses that run's VARS so the
+  installed boot manager is found (see §2b). `--no-overlay` is only for
+  baseline-build scripts (destructive to the baseline).
 - **`verify-untouched.sh` needs sudo** because `qemu-nbd` needs to load the
   `nbd` kernel module and `/dev/nbdN` is root-owned. There's no clean
   rootless alternative for block-level inspection.

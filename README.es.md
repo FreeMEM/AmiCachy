@@ -153,6 +153,8 @@ sudo ./tools/build_iso.sh                      # por defecto: --cpu-arch v3
 
 **Solo construye la ISO cuando necesites una imagen distribuible.** Para el desarrollo del dia a dia, usa el flujo de la VM de desarrollo.
 
+**Recuperar espacio en disco.** El flujo de build deja un artefacto fechado nuevo en `out/` en cada pasada (ISOs de ~2-4 GB, pendrives de hasta ~34 GB), y cada test de dual-boot deja un overlay de varios GB en `dev/`; esos directorios se hinchan rapido. `tools/clean.sh` los poda de forma **segura** (dry-run por defecto; nunca toca las baselines de `dev/dualboot-vm/`, ni la ISO mas reciente, ni `out/amicachy-target.sfs`). `./tools/clean.sh` ensena lo que liberaria; `./tools/clean.sh --yes` hace el barrido seguro (ISOs viejas + overlays de test + scratch de `dev/`). Reclamo extra opcional: `--pendrives` (imagenes `.img` de release), `--loaded` (ISO con assets + `.7z`), `--dev-vms` (discos scratch grandes de VMs). Ver `./tools/clean.sh --help`.
+
 #### Notas de compatibilidad hardware
 
 - **GPUs NVIDIA.** Las ISOs publicadas incluyen el driver propietario de NVIDIA (`nvidia-open-dkms` + `nvidia-utils`, soporta Turing+) y blacklistean nouveau via cmdline. Es la unica configuracion en la que Wayland/EGL funciona de forma fiable en RTX 20xx/30xx/40xx — el camino GSP de nouveau todavia falla con Ampere y rompe cage/wlroots. `nvidia-utils` esta bajo la NVIDIA Software License (limpia para redistribucion gratuita; el LICENSE se instala en `/usr/share/licenses/nvidia-utils/LICENSE`).
