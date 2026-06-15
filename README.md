@@ -151,7 +151,21 @@ sudo ./tools/build_iso.sh                      # default: --cpu-arch v3
 
 **Building flashable pendrive images.** `tools/build_pendrive.sh` wraps any AmiCachy ISO with a small (256 MB) `AMICACHY_DATA` seed partition (NTFS by default so Windows mounts it natively) into a single `.img` you can flash with one `dd`. The image is intentionally compact — on the first boot from the pendrive, `amicachy-grow-data.service` automatically expands `AMICACHY_DATA` to fill all remaining space on the stick (NTFS/ext4; exFAT is left alone). So a 64 GB pendrive ends up with ~63 GB of writable user space without forcing you to ship a 60 GB `.img`. Run `./tools/build_pendrive.sh --help` for the full set of flags (assets, seed size, filesystem type).
 
+**Building the installer (Calamares, F3/F4).** AmiCachy's installer is **Calamares** with Amiga branding: its configuration (sequence, branding, and the `amicachy-postinstall`/`amicachy-foreign-os` Python jobs) lives in the `pkg/calamares-config-amicachy/` package, and the system it installs is deployed from a **separate clean squashfs** (not the live one). So `build_iso.sh` expects a few packages in the local repo; if you touch the installer, rebuild them in this order (each drops its artifact in `out/`):
+
+```bash
+./tools/build_amicachy_base.sh                 # package with the installed-system (target) assets
+./tools/build_calamares_config.sh              # Calamares config/branding/modules (bump pkgrel when you touch it!)
+./tools/build_calamares_compat.sh              # temporary lib shim (yaml-cpp/boost); drop when upstream rebuilds
+./tools/build_target_rootfs.sh --cpu-arch v3   # squashfs of the installed system (~6 min, Docker)
+sudo ./tools/build_iso.sh --cpu-arch v3        # bundles the packages + target.sfs into the ISO
+```
+
+If you only changed `calamares-config`, just `build_calamares_config.sh` (bumping `pkgrel`, or mkarchiso reinstalls the cached copy) + `build_iso.sh` is enough. The full design, the `amiprofile=` contract, and the recurring gotchas live in `tasks/calamares-migration-handoff.md` and `tasks/calamares-f3-gotchas.md`.
+
 **Only build the ISO when you need a distributable image.** For day-to-day development, use the dev VM workflow below.
+
+**Reclaiming disk space.** Every build run drops a fresh dated artifact in `out/` (ISOs ~2-4 GB, pendrives up to ~34 GB), and each dual-boot test leaves a multi-GB overlay in `dev/`, so those dirs balloon fast. `tools/clean.sh` prunes them **safely** (dry-run by default; never touches the `dev/dualboot-vm/` baselines, the newest ISO, or `out/amicachy-target.sfs`). `./tools/clean.sh` shows what it would free; `./tools/clean.sh --yes` does the safe sweep (old ISOs + test overlays + `dev/` scratch). Optional extra reclaim: `--pendrives` (release `.img` images), `--loaded` (asset-loaded ISO + `.7z`), `--dev-vms` (big VM scratch disks). See `./tools/clean.sh --help`.
 
 #### Hardware support notes
 
@@ -280,6 +294,44 @@ When building the ISO, the build script **automatically detects** the compiled a
 ```
 
 If no amiberry package is found in `out/`, the ISO builds without it and prints a warning.
+
+### Dual-boot test bench (installing alongside Windows/Linux)
+
+To verify the installer **respects a pre-existing OS** (doesn't wipe an existing Windows/Linux), there's a QEMU/KVM bench in `dev/dualboot-vm/`: reproducible baselines, non-destructive overlays (the baseline is never touched), and partition-level verification. Full guide in `dev/dualboot-vm/README.md`; the gist:
+
+**1) Build the baselines (once).** qcow2 disks with a pre-installed OS that test runs never modify:
+
+```bash
+cd dev/dualboot-vm
+qemu-img create -f qcow2 baselines/empty-50g.qcow2 50G   # empty disk ("erase disk" test)
+./scripts/build-baseline-debian.sh                        # Debian (ext4+GRUB-EFI), unattended (~10-20 min)
+./scripts/build-baseline-windows.sh                       # Windows 11 (NTFS+ESP), SEMI-MANUAL (see below)
+```
+
+> **The Windows baseline is semi-manual.** Microsoft blocks automated ISO downloads by IP, so you normally drop your own `Win11_*.iso` into `dev/dualboot-vm/.cache/`. And on 24H2/25H2 the new setup engine ignores `autounattend.xml` during the windowsPE phase, so you click through ~5 prompts (key / edition / partition) during the build; the `specialize`/`oobeSystem` passes (account `tester`/`tester`, OOBE skip, locale) do apply. Details in the script header.
+
+**2) Test the alongside install** (same flow as a real ISO):
+
+```bash
+# a) Boot the baseline ON ITS OWN (no --iso) to confirm the existing OS still boots:
+./scripts/run-test.sh --baseline debian12-ext4-grub
+
+# b) Install AmiCachy on top, picking "Install alongside" in Calamares:
+./scripts/run-test.sh --baseline debian12-ext4-grub --iso ../../out/amicachy-v3-latest.iso
+
+# c) Boot the INSTALLED disk (the big overlay, several GB), reusing its NVRAM, to
+#    see the systemd-boot menu with AmiCachy + the previous OS:
+./scripts/run-test.sh --overlay overlays/<big-overlay>.qcow2
+```
+
+**3) Verify the pre-existing OS is intact:**
+
+```bash
+sudo ./scripts/verify-untouched.sh --baseline debian12-ext4-grub \
+     --overlay overlays/<big-overlay>.qcow2
+```
+
+Compares per-partition hashes. A pre-existing-OS partition showing `CHANGED` is a bug — **except** in "Install alongside", which **intentionally shrinks** the neighbour partition (`resize2fs` preserves the data): there the real proof is that the other OS still boots from the menu.
 
 ### Testing the ISO with KVM/libvirt
 
