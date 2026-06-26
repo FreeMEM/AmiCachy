@@ -116,7 +116,10 @@ fi
 # straight off the disk (e.g. to verify a baseline boots on its own, or to boot
 # the disk produced by a prior install via --overlay).
 if [[ -z "$ISO" && $BOOT_SET -eq 0 ]]; then
-    BOOT_ORDER="c"   # disk only — there is no CD to boot
+    # disk only — there is no CD to boot. menu=on + a generous splash-time make
+    # the OVMF boot menu catchable (press Esc/F12): needed to override the UEFI
+    # BootOrder when Windows has reasserted itself first after a Windows boot.
+    BOOT_ORDER="c,menu=on,splash-time=8000"
 fi
 
 # ---------------------------------------------------------------------------
@@ -230,6 +233,12 @@ QEMU_ARGS=(
     -device intel-hda
     -device hda-duplex
     -vga virtio
+
+    # Absolute USB pointer: keeps the host and guest cursors in sync. Without it
+    # the mouse is a relative PS/2 device, so QEMU grabs the pointer and the
+    # guest cursor lags/offsets — painful to navigate Windows.
+    -device qemu-xhci
+    -device usb-tablet
 
     # Logging: serial console (great for catching kernel panics)
     -serial "file:${SERIAL_LOG}"
