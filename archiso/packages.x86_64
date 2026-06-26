@@ -160,4 +160,10 @@ calamares-compat-libs
 
 # Persistent partition filesystem support (Windows-friendly options)
 ntfs-3g
+# ntfsresize/mkntfs/ntfsfix live in ntfsprogs (split out of ntfs-3g, which only
+# lists it as an OPTIONAL dep, so it is NOT pulled automatically). Calamares /
+# KPMcore needs ntfsresize to detect an NTFS as resizable; without it the
+# partition page hides "Install alongside" on a Windows disk and only offers the
+# destructive Replace/Erase. This is what blocked dual-boot-with-Windows (T3).
+ntfsprogs
 exfatprogs
