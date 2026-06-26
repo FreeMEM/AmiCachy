@@ -31,27 +31,42 @@ La decisión osciló en la sesión del 2026-06-14 y aterrizó así (pkgrel **-8*
 - **Gotcha #5 vigente**: AMIGADATA monta en /home/amiga/Amiga → `useradd -m` salta
   skel → `amicachy-postinstall` lo copia (imprescindible).
 - (Pendrive: cosa aparte, label `AMICACHY_DATA` por base inmutable; no confundir.)
-- **T2 (Windows) — BLOQUEO REAL ENCONTRADO (2026-06-15): NTFS sucia por Fast Startup.**
-  La baseline win11-ntfs tiene ESP de **512 MiB** (no ~100; mi nota anterior sobre la
-  ESP era especulativa y FALSA para nuestra baseline). El bloqueo de verdad: Calamares
-  **NO ofrece "Instalación paralela"** sobre Windows — solo Reemplazar (que borra el
-  C:)/Borrar/Manual. Causa: `PartUtils::canBeResized()` (ChoicePage:1354) falla porque
-  la NTFS está **"sucia"/hibernada**: Win11 trae **Fast Startup** activo y `shutdown /s`
-  hace un apagado híbrido que hiberna el kernel → `ntfsresize --info` (que KPMcore usa
-  para calcular el shrink) se niega → la partición no es redimensionable → botón oculto.
-  `ntfsresize` SÍ está en el live (vía `ntfs-3g`), así que no es falta de herramienta.
-  - **Fix baseline (hecho)**: `build-baseline-windows.sh` ahora hace `powercfg /h off`
-    antes del `shutdown /s` → NTFS limpia → redimensionable. Requiere rebuild de la
-    baseline (semi-manual) o, atajo, arrancar Windows con `--no-overlay` y hacer
-    `powercfg /h off` + apagar.
-  - **Fix usuarios reales (pendiente, el de verdad)**: dual-boot con Windows EXIGE
-    desactivar Fast Startup (gotcha universal Windows+Linux). El instalador debería
-    llevar un **`amicachy-preflight`** que detecte la NTFS sucia y **avise claramente**
-    ("reinicia a Windows, desactiva Inicio rápido y apaga del todo") en vez de ocultar
-    alongside y dejar solo el Reemplazar destructivo. Es el componente D del plan, ahora
-    claramente necesario.
+- **T2 (Windows) — VALIDADO E2E (2026-06-26).** Dual-boot con Windows funciona:
+  *alongside* encoge la NTFS, instala AmiCachy, y conviven Windows + AmiCachy
+  arrancando ambos desde systemd-boot. Hubo **dos bloqueos en serie** hasta aquí:
+  1. **NTFS sucia por Fast Startup (prerequisito real, NO la causa raíz).** Win11 trae
+     Fast Startup activo y `shutdown /s` hace apagado híbrido (hiberna el kernel) → NTFS
+     "sucia" → `ntfsresize` se niega. Fix baseline (hecho): `build-baseline-windows.sh`
+     hace `powercfg /h off` antes del `shutdown /s`. Para **usuarios reales** sigue
+     siendo un prerequisito (gotcha universal Windows+Linux) → componente D
+     (`amicachy-preflight`) que detecte la NTFS sucia y **avise** en vez de ocultar
+     alongside. (La ESP es de **512 MiB**; la nota antigua de "~100 MiB" era falsa.)
+  2. **BLOQUEO REAL = faltaba `ntfsprogs` en el live (causa raíz).** Con la NTFS **ya
+     limpia**, "Instalación paralela" SEGUÍA sin aparecer. Diagnóstico (descartando con
+     datos: NTFS sucia → `ntfsresize --info` la valida limpia; automontaje → vda3 sin
+     MOUNTPOINT; `requiredStorage` 5.5 GiB << 37.5 liberables; os-prober → ni instalado
+     y Debian funcionaba igual). Causa: KPMcore solo marca una NTFS como redimensionable
+     si encuentra el binario **`ntfsresize`**, y en Arch/CachyOS éste (+ mkntfs/ntfsfix/
+     ntfsclone) vive en el paquete **`ntfsprogs`**, que `ntfs-3g` declara solo como
+     dependencia **OPCIONAL** → no se arrastraba. El live tenía `ntfs-3g` pero NO
+     `ntfsprogs` (la nota previa "ntfsresize SÍ está vía ntfs-3g" era **FALSA**). Debian
+     (ext4) funcionaba porque `resize2fs` va en `e2fsprogs` (base). **Fix (commit
+     43c0e14): `ntfsprogs` añadido a `archiso/packages.x86_64`.** Ver memoria
+     `project_ntfs_resize_ntfsprogs`.
+- **Post-instalación: Windows roba el BootOrder UEFI.** Tras arrancar Windows una vez,
+  su `bootmgfw.efi` se recoloca primero en el `BootOrder` → el firmware arranca Windows
+  directo en vez del systemd-boot de AmiCachy. Comportamiento **conocido** de Windows
+  (no es bug; le pasa a GRUB y systemd-boot por igual). El menú y ambos SO siguen
+  intactos: se recupera vía el Boot Manager del firmware (Esc/F12) eligiendo *Linux Boot
+  Manager*. **Mitigación de producto pendiente** (ítem F4): opción 1 = documentar que el
+  usuario arranca Windows desde el menú de AmiCachy; opción 2 = servicio oneshot que
+  reafirme AmiCachy primero en el `BootOrder` (`efibootmgr -o`) en cada arranque.
+- **Bench (commit c7899ba)**: `run-test.sh` añade `usb-tablet` (cursor host/invitado
+  sincronizado) y activa el menú OVMF con `splash-time=8000` en arranques `--overlay`
+  (para poder elegir *Linux Boot Manager* cuando Windows roba el orden).
 
-**Pendiente: build de ISO + test E2E T2/T3** (lo corre el usuario, ver §Verificación).
+**Estado: T2 (Windows) y T3 (otro Linux/Debian) VALIDADOS E2E.** Pendientes: el
+preflight de NTFS sucia (componente D) y la mitigación del BootOrder de Windows.
 
 ---
 
